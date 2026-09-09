@@ -1,4 +1,4 @@
-module github.com/datasplice-labs/datasplice
+module github.com/datasplice-labs/datasplice-core
 
 go 1.26.1
 
