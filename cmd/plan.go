@@ -3,28 +3,35 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/datasplice-labs/datasplice/internal/config"
-	"github.com/datasplice-labs/datasplice/internal/pipeline"
 	"github.com/spf13/cobra"
+
+	"github.com/datasplice-labs/datasplice-core/internal/config"
+	"github.com/datasplice-labs/datasplice-core/internal/pipeline"
+	"github.com/datasplice-labs/datasplice-core/internal/redact"
 )
 
+// plan is a static check: does the pipeline compose at all, offline
+// (datasplice-core-prd.md §3 "What plan means here"). It resolves every
+// step's package and calls Describe, but never Configure or Process.
 var planCmd = &cobra.Command{
 	Use:   "plan",
-	Short: "Show what run would do, without doing it",
+	Short: "Check the pipeline can run, offline",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		m, v, err := config.Load(MainFile, VariablesFile)
+		resolved, err := config.LoadAndResolve(MainFile, VariablesFile)
 		if err != nil {
 			return err
 		}
-		if _, err := config.ResolveSecrets(m, v); err != nil {
+		steps, err := pipeline.Build(resolved.Main, resolved.SecretValues)
+		if err != nil {
 			return err
 		}
 
-		fmt.Printf("datasplice plan: %q\n\n", m.Name)
-		for i, line := range pipeline.Describe(m) {
-			fmt.Printf("  %d. %s\n", i+1, line)
+		rw := redact.New(cmd.OutOrStdout(), resolved.SecretValues)
+		fmt.Fprintf(rw, "Pipeline: %s\n\n", resolved.Main.Name)
+		for i, s := range steps {
+			fmt.Fprintf(rw, "  %d  %-10s %-10s %s\n", i+1, s.Describe.Name, s.Describe.Role, s.Uses)
 		}
-		fmt.Printf("\n%d steps. Run `datasplice run` to execute.\n", len(m.Steps))
+		fmt.Fprintf(rw, "\n✓ %d steps, roles compose\n✓ secrets resolve (%d referenced)\n", len(steps), len(resolved.SecretValues))
 		return nil
 	},
 }

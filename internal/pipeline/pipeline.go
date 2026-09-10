@@ -1,144 +1,208 @@
-// Package pipeline runs a flow described by config.Main.
-//
-// ponytail: hardcoded csv-only input/output, executed in-process — no
-// packages, no gRPC. This proves the row model end-to-end before paying
-// for the package system (docs/roadmap.md phase 4). Transform steps (the
-// ones in the middle of `steps[]`) are parsed but not executed: that needs
-// a package to actually run `via`/`on` against, which is phase 6. Upgrade
-// path: phase 6 replaces readCSV/writeCSV below with real calls over
-// docs/proto/datasplice.proto, dialed via hashicorp/go-plugin.
+// Package pipeline resolves a config.Main into runnable steps and
+// executes them: role composition, spawn (in-process, for now), stream
+// wiring, and cancellation — datasplice-core-prd.md §6.
 package pipeline
 
 import (
-	"encoding/csv"
+	"context"
 	"fmt"
-	"os"
+	"sync"
 
-	"github.com/datasplice-labs/datasplice/internal/config"
+	"github.com/datasplice-labs/datasplice-core/internal/config"
+	"github.com/datasplice-labs/datasplice-core/internal/contract"
+	"github.com/datasplice-labs/datasplice-core/internal/record"
 )
 
-// Row mirrors the Row message in docs/proto/datasplice.proto — same shape
-// so swapping this hardcoded pipeline for real packages later doesn't
-// change how a row looks.
-type Row = map[string]string
-
-func stepPath(step config.Step) (string, bool) {
-	p, ok := step.With["path"].(string)
-
-	return p, ok && p != ""
+// Step is one resolved, described stage — a package instance plus its
+// interpolated settings, ready for Configure.
+type Step struct {
+	ID       string
+	Uses     string
+	Pkg      contract.Package
+	Describe contract.Describe
+	With     map[string]any
+	Fn       string
+	On       []string
+	Secrets  map[string]string
 }
 
-func readCSV(path string) (header []string, rows []Row, err error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, nil, err
-	}
-	defer f.Close()
-
-	records, err := csv.NewReader(f).ReadAll()
-	if err != nil {
-		return nil, nil, err
-	}
-	if len(records) == 0 {
-		return nil, nil, nil
-	}
-
-	header = records[0]
-	rows = make([]Row, 0, len(records)-1)
-	for _, rec := range records[1:] {
-		row := make(Row, len(header))
-		for i, col := range header {
-			if i < len(rec) {
-				row[col] = rec[i]
-			}
-		}
-		rows = append(rows, row)
-	}
-	return header, rows, nil
-}
-
-// writeCSV writes to stdout when path is empty.
-func writeCSV(path string, header []string, rows []Row) error {
-	out := os.Stdout
-	if path != "" {
-		f, err := os.Create(path)
+// Build resolves every step's package, interpolates its settings, and
+// checks the pipeline shape rules (datasplice-core-prd.md §2): exactly
+// one source first, one sink last, transforms in between.
+func Build(m *config.Main, secretValues map[string]string) ([]Step, error) {
+	steps := make([]Step, len(m.Steps))
+	for i, s := range m.Steps {
+		p, err := resolve(s.Uses)
 		if err != nil {
-			return err
+			return nil, fmt.Errorf("step %d (%s): %w", i+1, s.Uses, err)
 		}
-		defer f.Close()
-		out = f
-	}
 
-	w := csv.NewWriter(out)
-	if err := w.Write(header); err != nil {
-		return err
-	}
-	for _, row := range rows {
-		rec := make([]string, len(header))
-		for i, col := range header {
-			rec[i] = row[col]
+		with, err := config.Interpolate(s.With, secretValues)
+		if err != nil {
+			return nil, fmt.Errorf("step %d (%s): %w", i+1, s.Uses, err)
 		}
-		if err := w.Write(rec); err != nil {
-			return err
+
+		d := p.Describe()
+		steps[i] = Step{
+			ID:       fmt.Sprintf("%d-%s", i+1, d.Name),
+			Uses:     s.Uses,
+			Pkg:      p,
+			Describe: d,
+			With:     with,
+			Fn:       s.Fn,
+			On:       s.On,
+			Secrets:  config.ReferencedValues(s.With, secretValues),
 		}
 	}
-	w.Flush()
-	return w.Error()
+	if err := checkShape(steps); err != nil {
+		return nil, err
+	}
+	if err := checkFunctions(steps); err != nil {
+		return nil, err
+	}
+	return steps, nil
 }
 
-// Run reads the input step's csv, passes rows through unchanged, and
-// writes the output step's csv (or stdout, if the output step has no
-// `with.path`).
-func Run(m *config.Main) error {
-	if m.Config.Input.Type != "csv" || m.Config.Output.Type != "csv" {
-		return fmt.Errorf("only csv input/output is wired up until the package system lands (docs/roadmap.md phase 6); got input=%q output=%q", m.Config.Input.Type, m.Config.Output.Type)
+func checkShape(steps []Step) error {
+	n := len(steps)
+	if steps[0].Describe.Role != contract.RoleSource {
+		return fmt.Errorf("step 1 (%s) must be a source, got %s", steps[0].Uses, steps[0].Describe.Role)
 	}
-
-	inPath, ok := stepPath(m.Steps[0])
-	if !ok {
-		return fmt.Errorf("input step %q needs `with.path`", m.Steps[0].Uses)
+	if steps[n-1].Describe.Role != contract.RoleSink {
+		return fmt.Errorf("step %d (%s) must be a sink, got %s", n, steps[n-1].Uses, steps[n-1].Describe.Role)
 	}
-	header, rows, err := readCSV(inPath)
-	if err != nil {
-		return fmt.Errorf("reading input: %w", err)
-	}
-
-	outPath, _ := stepPath(m.Steps[len(m.Steps)-1]) // empty path -> stdout
-	if err := writeCSV(outPath, header, rows); err != nil {
-		return fmt.Errorf("writing output: %w", err)
+	for i := 1; i < n-1; i++ {
+		if steps[i].Describe.Role != contract.RoleTransform {
+			return fmt.Errorf("step %d (%s) must be a transform, got %s", i+1, steps[i].Uses, steps[i].Describe.Role)
+		}
 	}
 	return nil
 }
 
-// Describe renders the one-line-per-step macro report `datasplice plan`
-// prints (docs/schema.md#plan-output).
-//
-// ponytail: this reads the yaml directly to guess a description. Once
-// packages exist (phase 6), each package supplies its own
-// ConfigureResponse.plan_description instead — see
-// docs/proto/datasplice.proto.
-func Describe(m *config.Main) []string {
-	lines := make([]string, 0, len(m.Steps))
-	for i, step := range m.Steps {
-		role := "step"
-		switch i {
-		case 0:
-			role = "input"
-		case len(m.Steps) - 1:
-			role = "output"
+func checkFunctions(steps []Step) error {
+	for i, s := range steps {
+		if s.Describe.Role != contract.RoleTransform {
+			if s.Fn != "" || len(s.On) > 0 {
+				return fmt.Errorf("step %d (%s): `fn`/`on` are only valid on transform steps", i+1, s.Uses)
+			}
+			continue
 		}
-
-		detail := ""
-		switch {
-		case len(step.Via) > 0:
-			detail = fmt.Sprintf("via %v on columns %v", step.Via, step.On)
-		default:
-			if p, ok := stepPath(step); ok {
-				detail = p
+		if s.Fn == "" {
+			continue
+		}
+		found := false
+		for _, f := range s.Describe.Functions {
+			if f.Name == s.Fn {
+				found = true
+				break
 			}
 		}
-
-		lines = append(lines, fmt.Sprintf("%-6s %-45s %s", role, step.Uses, detail))
+		if !found {
+			return fmt.Errorf("step %d (%s): unknown fn %q", i+1, s.Uses, s.Fn)
+		}
 	}
-	return lines
+	return nil
+}
+
+// Configure calls Configure exactly once per step, in order.
+func Configure(steps []Step) error {
+	for _, s := range steps {
+		if err := s.Pkg.Configure(s.With, s.Fn, s.On, s.Secrets); err != nil {
+			return fmt.Errorf("%s: %w", s.ID, err)
+		}
+	}
+	return nil
+}
+
+// Run wires each step's Process to the next over channels and waits for
+// all of them. The sink closing its output — implicit here when its
+// Process returns — is the commit signal (datasplice-protocol.md §4).
+// Any step's error cancels the shared context, which every other step's
+// Process must observe to unblock its channel sends.
+func Run(ctx context.Context, steps []Step) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	chans := make([]chan contract.Batch, len(steps)-1)
+	for i := range chans {
+		chans[i] = make(chan contract.Batch, 4)
+	}
+
+	var wg sync.WaitGroup
+	errs := make(chan error, len(steps))
+	for i, s := range steps {
+		var in <-chan contract.Batch
+		var out chan<- contract.Batch
+		if i > 0 {
+			in = chans[i-1]
+		}
+		if i < len(steps)-1 {
+			out = chans[i]
+		}
+
+		wg.Add(1)
+		go func(s Step, in <-chan contract.Batch, out chan<- contract.Batch) {
+			defer wg.Done()
+			if out != nil {
+				defer close(out)
+			}
+			if err := s.Pkg.Process(ctx, in, out); err != nil {
+				errs <- fmt.Errorf("%s: %w", s.ID, err)
+				cancel()
+			}
+		}(s, in, out)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// RunDryRun runs the full pipeline but swaps the sink for a counter that
+// keeps a small sample instead of writing (datasplice-core-prd.md §3).
+func RunDryRun(ctx context.Context, steps []Step) (count int, sample []record.Record, err error) {
+	c := &dryRunSink{}
+	dsSteps := append([]Step{}, steps[:len(steps)-1]...)
+	dsSteps = append(dsSteps, Step{
+		ID: steps[len(steps)-1].ID, Uses: "dry-run", Pkg: c,
+		Describe: contract.Describe{Name: "dry-run", Role: contract.RoleSink},
+	})
+	err = Run(ctx, dsSteps)
+	return c.count, c.sample, err
+}
+
+const dryRunSampleSize = 5
+
+type dryRunSink struct {
+	count  int
+	sample []record.Record
+}
+
+func (d *dryRunSink) Describe() contract.Describe {
+	return contract.Describe{Name: "dry-run", Role: contract.RoleSink}
+}
+
+func (d *dryRunSink) Configure(map[string]any, string, []string, map[string]string) error { return nil }
+
+func (d *dryRunSink) Process(ctx context.Context, in <-chan contract.Batch, out chan<- contract.Batch) error {
+	for {
+		select {
+		case batch, ok := <-in:
+			if !ok {
+				return nil
+			}
+			d.count += len(batch)
+			for _, r := range batch {
+				if len(d.sample) < dryRunSampleSize {
+					d.sample = append(d.sample, r)
+				}
+			}
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 }

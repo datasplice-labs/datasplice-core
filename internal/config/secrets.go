@@ -7,40 +7,76 @@ import (
 )
 
 const (
-	// noenv resolves to nothing. This means no environment variables
+	// EnvVarsTypeNoEnv resolves to nothing — a missing secrets block is
+	// always an error, so "no secrets" must be said explicitly.
 	EnvVarsTypeNoEnv = "noenv"
-	// plain resolves to the declared values.
+	// EnvVarsTypePlain resolves from the `values` map inline in the file.
+	// Local convenience only; Resolve's caller (LoadAndResolve) warns
+	// every time one is loaded.
 	EnvVarsTypePlain = "plain"
-	// file resolves to values read from a file.
+	// EnvVarsTypeFile resolves from a dotenv file at Filepath.
 	EnvVarsTypeFile = "file"
-	// injected resolves to values read from the environment (os.LookupEnv).
+	// EnvVarsTypeInjected resolves from the process environment. The
+	// cloud path.
 	EnvVarsTypeInjected = "injected"
 )
 
-// Resolve turns the declared secrets block into actual values, per the
-// `type` semantics in docs/schema.md#variablesyaml. Returns (nil, nil) for
-// type: noenv.
-func (e *Secrets) Resolve() (map[string]string, error) {
+// Resolve looks up exactly the secret names referenced anywhere in
+// main.yaml's `with:` blocks (see referencedNames) — never more, so
+// nothing outside those ${NAME} refs ever enters the process.
+func (e *Secrets) Resolve(names []string) (map[string]string, error) {
 	switch e.Type {
 	case EnvVarsTypeNoEnv:
-		return nil, nil
+		if len(names) > 0 {
+			return nil, fmt.Errorf("secrets: type is %q but %v are referenced", EnvVarsTypeNoEnv, names)
+		}
+
+		return map[string]string{}, nil
 	case EnvVarsTypePlain:
-		return e.Values, nil
+		return lookup(names, e.Values, "declared in `secrets.values`")
 	case EnvVarsTypeFile:
-		return resolveFromFile(e.Filepath, e.Values)
+		values, err := parseDotenv(e.Filepath)
+		if err != nil {
+			return nil, err
+		}
+		return lookup(names, values, fmt.Sprintf("found in %s", e.Filepath))
 	case EnvVarsTypeInjected:
-		return resolveFromEnv(e.Values)
+		values := map[string]string{}
+		for _, n := range names {
+			if v, ok := os.LookupEnv(n); ok {
+				values[n] = v
+			}
+		}
+		return lookup(names, values, "set in the environment")
 	default:
-		return nil, fmt.Errorf("secrets: unknown type %q (accepted: %s | %s | %s | %s)", e.Type, EnvVarsTypeNoEnv, EnvVarsTypePlain, EnvVarsTypeFile, EnvVarsTypeInjected)
+		return nil, fmt.Errorf("secrets: unknown type %q (accepted: %s | %s | %s | %s)",
+			e.Type, EnvVarsTypeNoEnv, EnvVarsTypePlain, EnvVarsTypeFile, EnvVarsTypeInjected)
 	}
 }
 
-// resolveFromFile reads a minimal KEY=VALUE file (like .env) — no need for
-// a parsing dependency for something this small.
-func resolveFromFile(path string, secrets map[string]string) (map[string]string, error) {
+// Given a list of names and a map of values, lookup returns a map of the
+// names to their values, or an error (provided) if any name is missing.
+func lookup(names []string, values map[string]string, sourceDesc string) (map[string]string, error) {
+	resolved := make(map[string]string, len(names))
+
+	for _, n := range names {
+		v, ok := values[n]
+		if !ok {
+			return nil, fmt.Errorf("secrets: %q is not %s", n, sourceDesc)
+		}
+
+		resolved[n] = v
+	}
+
+	return resolved, nil
+}
+
+// parseDotenv reads a minimal KEY=VALUE file; no need for a parsing
+// dependency for something this small.
+func parseDotenv(path string) (map[string]string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("secrets: reading %s: %w", path, err)
+		return nil, fmt.Errorf("secrets: error reading %s: %w", path, err)
 	}
 
 	values := map[string]string{}
@@ -49,32 +85,14 @@ func resolveFromFile(path string, secrets map[string]string) (map[string]string,
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
+
 		key, val, ok := strings.Cut(line, "=")
 		if !ok {
 			continue
 		}
+
 		values[strings.TrimSpace(key)] = strings.Trim(strings.TrimSpace(val), `"'`)
 	}
 
-	resolved := make(map[string]string, len(secrets))
-	for name, key := range secrets {
-		v, ok := values[key]
-		if !ok {
-			return nil, fmt.Errorf("secrets: key %q not found in %s (referenced by %q)", key, path, name)
-		}
-		resolved[name] = v
-	}
-	return resolved, nil
-}
-
-func resolveFromEnv(secrets map[string]string) (map[string]string, error) {
-	resolved := make(map[string]string, len(secrets))
-	for name, key := range secrets {
-		v, ok := os.LookupEnv(key)
-		if !ok {
-			return nil, fmt.Errorf("secrets: %q is not set in the environment (referenced by %q)", key, name)
-		}
-		resolved[name] = v
-	}
-	return resolved, nil
+	return values, nil
 }
