@@ -16,23 +16,23 @@ type Resolved struct {
 	SecretValues map[string]string // name -> value, for every ${NAME} referenced anywhere in Main
 }
 
-// LoadAndResolve parses main.yaml/variables.yaml, picks the secrets block,
+// LoadAndResolve parses main.yaml/secrets.yaml, picks the secrets block,
 // and resolves every ${NAME} referenced in any step's `with:` block
 // against it — all before anything spawns.
-func LoadAndResolve(mainPath, varsPath string) (*Resolved, error) {
-	m, v, err := Load(mainPath, varsPath)
+func LoadAndResolve(mainPath, secretsPath string) (*Resolved, error) {
+	m, sf, err := Load(mainPath, secretsPath)
 	if err != nil {
 		return nil, err
 	}
 
-	block, err := ResolveSecrets(m, v)
+	block, err := ResolveSecrets(m, sf)
 	if err != nil {
 		return nil, err
 	}
 
 	var warnings []string
 	if block.Type == EnvVarsTypePlain {
-		warnings = append(warnings, `secrets type "plain" stores values inline — gitignore this file`)
+		warnings = append(warnings, `secrets type "plain" stores values inline. Remember to gitignore this file`)
 	}
 
 	names := referencedNames(m)

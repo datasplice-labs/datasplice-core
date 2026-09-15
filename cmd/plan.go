@@ -17,7 +17,7 @@ var planCmd = &cobra.Command{
 	Use:   "plan",
 	Short: "Check the pipeline can run, offline",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		resolved, err := config.LoadAndResolve(MainFile, VariablesFile)
+		resolved, err := config.LoadAndResolve(MainFile, SecretsFile)
 		if err != nil {
 			return err
 		}
@@ -27,12 +27,16 @@ var planCmd = &cobra.Command{
 		}
 
 		rw := redact.New(cmd.OutOrStdout(), resolved.SecretValues)
-		fmt.Fprintf(rw, "Pipeline: %s\n\n", resolved.Main.Name)
-		for i, s := range steps {
-			fmt.Fprintf(rw, "  %d  %-10s %-10s %s\n", i+1, s.Describe.Name, s.Describe.Role, s.Uses)
+		if _, err := fmt.Fprintf(rw, "Pipeline: %s\n\n", resolved.Main.Name); err != nil {
+			return err
 		}
-		fmt.Fprintf(rw, "\n✓ %d steps, roles compose\n✓ secrets resolve (%d referenced)\n", len(steps), len(resolved.SecretValues))
-		return nil
+		for i, s := range steps {
+			if _, err := fmt.Fprintf(rw, "  %d  %-10s %-10s %s\n", i+1, s.Describe.Name, s.Describe.Role, s.Uses); err != nil {
+				return err
+			}
+		}
+		_, err = fmt.Fprintf(rw, "\n✓ %d steps, roles compose\n✓ secrets resolve (%d referenced)\n", len(steps), len(resolved.SecretValues))
+		return err
 	},
 }
 

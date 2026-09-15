@@ -13,19 +13,22 @@ import (
 
 var dryRun bool
 
-// ponytail: no separate `init` command — package resolution/installation
-// (docs/roadmap: `datasplice get`, M3) belongs right here, as one pass
+// package resolution/installation belongs right here, as one pass
 // over every step before any row processing starts, so a missing package
-// fails clean before anything's been written. Not implemented yet: M0/M1
-// only know first-party builtins.
+// fails clean before anything's been written.
 var runCmd = &cobra.Command{
 	Use:   "run",
 	Short: fmt.Sprintf("Run the flow described by %s", MainFile),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		resolved, err := config.LoadAndResolve(MainFile, VariablesFile)
+		// Load and resolve the main and secrets files, then build and configure the pipeline.
+		resolved, err := config.LoadAndResolve(MainFile, SecretsFile)
 		if err != nil {
 			return err
 		}
+
+		// Build the pipeline steps from the resolved config
+		// making sure that the secrets are correctly interpolated into the step configurations
+		// and that the pipeline shape rules are followed (1 in, 1 out, X transforms).
 		steps, err := pipeline.Build(resolved.Main, resolved.SecretValues)
 		if err != nil {
 			return err
@@ -50,6 +53,7 @@ var runCmd = &cobra.Command{
 			}
 			return nil
 		}
+
 		return pipeline.Run(ctx, steps)
 	},
 }

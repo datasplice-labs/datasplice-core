@@ -27,26 +27,43 @@ type Step struct {
 }
 
 // Build resolves every step's package, interpolates its settings, and
-// checks the pipeline shape rules (datasplice-core-prd.md §2): exactly
-// one source first, one sink last, transforms in between.
+// checks the pipeline shape rules: exactly 1 source first, 1 sink last, transforms in between.
 func Build(m *config.Main, secretValues map[string]string) ([]Step, error) {
 	steps := make([]Step, len(m.Steps))
+
+	// Looping over the steps in order is important for two reasons:
+	// 1. The first and last steps must be source and sink, respectively.
+	// 2. The last step's export mustn't be invalid, so we need to know which step is last.
 	for i, s := range m.Steps {
+		// This resolves the package
 		p, err := resolve(s.Uses)
 		if err != nil {
 			return nil, fmt.Errorf("step %d (%s): %w", i+1, s.Uses, err)
 		}
 
+		// We interpolate secrets
 		with, err := config.Interpolate(s.With, secretValues)
 		if err != nil {
 			return nil, fmt.Errorf("step %d (%s): %w", i+1, s.Uses, err)
+		}
+
+		// The last step cannot have an export, because there is nothing downstream to receive it.
+		// The export is only valid on transform steps, which must be in the middle of the pipeline.
+		// In the last step, we only reference an "output", which is not an export, but rather the final output of the pipeline.
+		if s.Export != nil && i == len(m.Steps)-1 {
+			return nil, fmt.Errorf("step %d (%s): export is not valid on the last step — nothing downstream to receive it", i+1, s.Uses)
+		}
+
+		pkg := p
+		if s.Export != nil {
+			pkg = newExportingPackage(p, s.Export)
 		}
 
 		d := p.Describe()
 		steps[i] = Step{
 			ID:       fmt.Sprintf("%d-%s", i+1, d.Name),
 			Uses:     s.Uses,
-			Pkg:      p,
+			Pkg:      pkg,
 			Describe: d,
 			With:     with,
 			Fn:       s.Fn,
@@ -54,12 +71,17 @@ func Build(m *config.Main, secretValues map[string]string) ([]Step, error) {
 			Secrets:  config.ReferencedValues(s.With, secretValues),
 		}
 	}
+
+	// We have built the steps package. Now we check its shape and rules
 	if err := checkShape(steps); err != nil {
 		return nil, err
 	}
+
+	// Checking functions (to be deprecated)
 	if err := checkFunctions(steps); err != nil {
 		return nil, err
 	}
+
 	return steps, nil
 }
 
@@ -68,14 +90,17 @@ func checkShape(steps []Step) error {
 	if steps[0].Describe.Role != contract.RoleSource {
 		return fmt.Errorf("step 1 (%s) must be a source, got %s", steps[0].Uses, steps[0].Describe.Role)
 	}
+
 	if steps[n-1].Describe.Role != contract.RoleSink {
 		return fmt.Errorf("step %d (%s) must be a sink, got %s", n, steps[n-1].Uses, steps[n-1].Describe.Role)
 	}
+
 	for i := 1; i < n-1; i++ {
 		if steps[i].Describe.Role != contract.RoleTransform {
 			return fmt.Errorf("step %d (%s) must be a transform, got %s", i+1, steps[i].Uses, steps[i].Describe.Role)
 		}
 	}
+
 	return nil
 }
 
@@ -116,7 +141,7 @@ func Configure(steps []Step) error {
 
 // Run wires each step's Process to the next over channels and waits for
 // all of them. The sink closing its output — implicit here when its
-// Process returns — is the commit signal (datasplice-protocol.md §4).
+// Process returns — is the commit signal.
 // Any step's error cancels the shared context, which every other step's
 // Process must observe to unblock its channel sends.
 func Run(ctx context.Context, steps []Step) error {
