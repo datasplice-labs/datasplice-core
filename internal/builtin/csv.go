@@ -44,13 +44,17 @@ func (c *CSV) Configure(settings map[string]any, fn string, on []string, secrets
 	return nil
 }
 
-func (c *CSV) Process(ctx context.Context, in <-chan contract.Batch, out chan<- contract.Batch) error {
+func (c *CSV) Process(ctx context.Context, in <-chan contract.Batch, out chan<- contract.Batch) (err error) {
 	f, err := os.Create(c.path)
 	if err != nil {
 		return fmt.Errorf("csv: %w", err)
 	}
 
-	defer f.Close()
+	defer func() {
+		if cerr := f.Close(); err == nil {
+			err = cerr
+		}
+	}()
 
 	w := csv.NewWriter(f)
 	defer w.Flush()
