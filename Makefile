@@ -19,7 +19,7 @@ else
 endif
 
 test:
-	go test -covermode=atomic -coverpkg=./... -shuffle=on
+	go test -covermode=atomic -coverpkg=./... -shuffle=on ./...
 
 lint:
 	golangci-lint run ./...
