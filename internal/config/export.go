@@ -26,7 +26,7 @@ func (e *Export) Apply(in, out record.Record) (record.Record, error) {
 	for name, path := range e.Values {
 		scope, rest, ok := strings.Cut(path, ".")
 		if !ok {
-			return nil, fmt.Errorf("export: value %q for %q must be a dotted path starting with in. or out.", path, name)
+			return nil, fmt.Errorf("export: value %q for %q must be a dotted path starting with in. or out", path, name)
 		}
 
 		var src record.Record
