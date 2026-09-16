@@ -44,7 +44,7 @@ func TestHTTPCursorPaginationAndAuth(t *testing.T) {
 	}, "", nil, nil); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
-	if h.Describe().Role != contract.RoleSource {
+	if !h.Describe().HasRole(contract.RoleSource) {
 		t.Fatalf("http must be a source")
 	}
 
