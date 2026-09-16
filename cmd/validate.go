@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/datasplice-labs/datasplice-core/internal/config"
+	"github.com/datasplice-labs/datasplice-core/internal/redact"
 	"github.com/spf13/cobra"
 )
 
@@ -18,12 +19,14 @@ var validateCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		rw := redact.New(cmd.OutOrStdout(), resolved.SecretValues)
 		for _, w := range resolved.Warnings {
-			if _, err := fmt.Fprintln(cmd.OutOrStdout(), "warning:", w); err != nil {
+			if _, err := fmt.Fprintln(rw, "warning:", w); err != nil {
 				return err
 			}
 		}
-		_, err = fmt.Fprintf(cmd.OutOrStdout(), "%s: valid (%d steps, secrets resolve)\n", MainFile, len(resolved.Main.Steps))
+
+		_, err = fmt.Fprintf(rw, "%s: valid (%d steps, secrets resolve)\n", MainFile, len(resolved.Main.Steps))
 		return err
 	},
 }
