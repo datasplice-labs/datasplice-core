@@ -47,9 +47,13 @@ var runCmd = &cobra.Command{
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(rw, "dry run: %d records would reach the sink\n\nsample:\n", count)
+			if _, err := fmt.Fprintf(rw, "dry run: %d records would reach the sink\n\nsample:\n", count); err != nil {
+				return err
+			}
 			for _, r := range sample {
-				fmt.Fprintf(rw, "  %v\n", r)
+				if _, err := fmt.Fprintf(rw, "  %v\n", r); err != nil {
+					return err
+				}
 			}
 			return nil
 		}
