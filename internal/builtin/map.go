@@ -20,7 +20,7 @@ type Map struct {
 func NewMap() *Map { return &Map{} }
 
 func (m *Map) Describe() contract.Describe {
-	return contract.Describe{Name: "map", Version: "0.1.0", Role: contract.RoleTransform}
+	return contract.Describe{Name: "map", Version: "0.1.0", Roles: []contract.Role{contract.RoleTransform}}
 }
 
 func (m *Map) Configure(settings map[string]any, fn string, on []string, secrets map[string]string) error {

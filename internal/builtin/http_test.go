@@ -28,7 +28,9 @@ func TestHTTPCursorPaginationAndAuth(t *testing.T) {
 		if idx+1 < len(pages) {
 			body["next"] = srv.URL // same stub server serves the "next" page too
 		}
-		json.NewEncoder(w).Encode(body)
+		if err := json.NewEncoder(w).Encode(body); err != nil {
+			t.Errorf("encoding response: %v", err)
+		}
 	}))
 
 	defer srv.Close()
@@ -42,7 +44,7 @@ func TestHTTPCursorPaginationAndAuth(t *testing.T) {
 	}, "", nil, nil); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
-	if h.Describe().Role != contract.RoleSource {
+	if !h.Describe().HasRole(contract.RoleSource) {
 		t.Fatalf("http must be a source")
 	}
 

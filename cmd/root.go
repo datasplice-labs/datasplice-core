@@ -9,8 +9,8 @@ import (
 const (
 	// Name of the files required
 	// for a datasplice run.
-	MainFile      = "main.yaml"
-	VariablesFile = "variables.yaml"
+	MainFile    = "main.yaml"
+	SecretsFile = "secrets.yaml"
 )
 
 var rootCmd = &cobra.Command{

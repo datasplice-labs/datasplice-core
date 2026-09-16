@@ -5,12 +5,25 @@ package contract
 
 import (
 	"context"
+	"slices"
+	"strings"
 
 	"github.com/datasplice-labs/datasplice-core/internal/record"
 )
 
-// Role mirrors datasplice.v1.Role — a package declares exactly one,
-// statically, so `plan` can check pipeline composition offline.
+// Role mirrors datasplice.v1.Role — a package declares the set it can act
+// as (Describe.Roles), statically, so `plan` can check pipeline
+// composition offline. pipeline.Build picks whichever declared role fits
+// a step's position (first -> source, last -> sink, otherwise ->transform);
+// most builtins declare exactly one and have no choice to make.
+// A package that declares more than one (e.g. `json`, which can read or write)
+// tells which one it's playing at runtime the same way
+// Process always has:
+//
+//	in == nil means "I'm the source here"
+//	out == nil means "I'm the sink here"
+//
+// The position decides the role, not a field.
 type Role int
 
 const (
@@ -65,9 +78,28 @@ type SettingSpec struct {
 type Describe struct {
 	Name      string
 	Version   string
-	Role      Role
+	Roles     []Role
 	Functions []Function
 	Settings  []SettingSpec
+}
+
+// HasRole reports whether the package can act as r.
+func (d Describe) HasRole(r Role) bool {
+	return slices.Contains(d.Roles, r)
+}
+
+// RolesString formats Roles for error messages, e.g. "source/sink".
+func (d Describe) RolesString() string {
+	if len(d.Roles) == 0 {
+		return RoleUnspecified.String()
+	}
+
+	parts := make([]string, len(d.Roles))
+	for i, r := range d.Roles {
+		parts[i] = r.String()
+	}
+
+	return strings.Join(parts, "/")
 }
 
 // Batch mirrors datasplice.v1.RecordBatch.

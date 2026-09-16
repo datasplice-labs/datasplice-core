@@ -54,6 +54,47 @@ func TestEndToEndJSONMapCSV(t *testing.T) {
 	}
 }
 
+// TestEndToEndJSONAsSink covers datasplice-prd-tasks.md T3.10: json can
+// act as the last step (sink), not just the first (source) — the same
+// package, chosen by position, per contract.Role's doc comment.
+func TestEndToEndJSONAsSink(t *testing.T) {
+	dir := t.TempDir()
+	inPath := filepath.Join(dir, "in.json")
+	outPath := filepath.Join(dir, "out.json")
+
+	if err := os.WriteFile(inPath, []byte(`[{"id": 1, "name": "Ada"}]`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m := &config.Main{
+		Name: "json-sink",
+		Steps: []config.Step{
+			{Uses: "datasplice/json@latest", With: map[string]any{"path": inPath}},
+			{Uses: "datasplice/json@latest", With: map[string]any{"path": outPath}},
+		},
+	}
+
+	steps, err := Build(m, nil)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if err := Configure(steps); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+	if err := Run(context.Background(), steps); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	got, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("reading output: %v", err)
+	}
+	want := `[{"id":1,"name":"Ada"}]`
+	if string(got) != want {
+		t.Fatalf("json output = %q, want %q", got, want)
+	}
+}
+
 func TestBuildRejectsBadShape(t *testing.T) {
 	m := &config.Main{
 		Name: "bad",
@@ -67,11 +108,113 @@ func TestBuildRejectsBadShape(t *testing.T) {
 	}
 }
 
+func TestBuildRejectsExportOnLastStep(t *testing.T) {
+	m := &config.Main{
+		Name: "bad-export",
+		Steps: []config.Step{
+			{Uses: "datasplice/json@latest", With: map[string]any{"path": "x.json"}},
+			{Uses: "datasplice/csv@latest", With: map[string]any{"path": "x.csv"}, Export: &config.Export{Passthrough: true}},
+		},
+	}
+	if _, err := Build(m, nil); err == nil {
+		t.Fatalf("expected error for export on the last step")
+	}
+}
+
+func TestExportOnSourceStep(t *testing.T) {
+	dir := t.TempDir()
+	inPath := filepath.Join(dir, "in.json")
+	outPath := filepath.Join(dir, "out.csv")
+	if err := os.WriteFile(inPath, []byte(`[{"id": 1, "extra": "drop me"}]`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m := &config.Main{
+		Name: "export-source",
+		Steps: []config.Step{
+			{
+				Uses: "datasplice/json@latest",
+				With: map[string]any{"path": inPath},
+				// no passthrough: only `values` survive, "extra" is dropped
+				Export: &config.Export{Values: map[string]string{"identifier": "in.id"}},
+			},
+			{Uses: "datasplice/csv@latest", With: map[string]any{"path": outPath}},
+		},
+	}
+
+	steps, err := Build(m, nil)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if err := Configure(steps); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+	if err := Run(context.Background(), steps); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	got, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("reading output: %v", err)
+	}
+	want := "identifier\n1\n"
+	if string(got) != want {
+		t.Fatalf("csv output = %q, want %q", got, want)
+	}
+}
+
+func TestExportOnTransformStep(t *testing.T) {
+	dir := t.TempDir()
+	inPath := filepath.Join(dir, "in.json")
+	outPath := filepath.Join(dir, "out.csv")
+	if err := os.WriteFile(inPath, []byte(`[{"id": 1, "name": "Ada"}]`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m := &config.Main{
+		Name: "export-transform",
+		Steps: []config.Step{
+			{Uses: "datasplice/json@latest", With: map[string]any{"path": inPath}},
+			{
+				Uses: "datasplice/map@latest",
+				With: map[string]any{"select": []any{"name"}}, // map itself only keeps "name"
+				Export: &config.Export{
+					Passthrough: true, // keep what map produced ("name")
+					Values:      map[string]string{"original_id": "in.id"}, // pull from the pre-map record
+				},
+			},
+			{Uses: "datasplice/csv@latest", With: map[string]any{"path": outPath}},
+		},
+	}
+
+	steps, err := Build(m, nil)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if err := Configure(steps); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+	if err := Run(context.Background(), steps); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	got, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("reading output: %v", err)
+	}
+	want := "name,original_id\nAda,1\n"
+	if string(got) != want {
+		t.Fatalf("csv output = %q, want %q", got, want)
+	}
+}
+
 func TestRunDryRunDoesNotWriteSink(t *testing.T) {
 	dir := t.TempDir()
 	inPath := filepath.Join(dir, "in.json")
 	outPath := filepath.Join(dir, "out.csv")
-	os.WriteFile(inPath, []byte(`[{"id": 1}, {"id": 2}, {"id": 3}]`), 0o644)
+	if err := os.WriteFile(inPath, []byte(`[{"id": 1}, {"id": 2}, {"id": 3}]`), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	m := &config.Main{
 		Name: "dry",

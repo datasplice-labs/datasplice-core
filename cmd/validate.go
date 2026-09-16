@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/datasplice-labs/datasplice-core/internal/config"
+	"github.com/datasplice-labs/datasplice-core/internal/redact"
 	"github.com/spf13/cobra"
 )
 
@@ -14,15 +15,19 @@ var validateCmd = &cobra.Command{
 	Use:   "validate",
 	Short: "Parse and schema-check the flow, without spawning any package",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		resolved, err := config.LoadAndResolve(MainFile, VariablesFile)
+		resolved, err := config.LoadAndResolve(MainFile, SecretsFile)
 		if err != nil {
 			return err
 		}
+		rw := redact.New(cmd.OutOrStdout(), resolved.SecretValues)
 		for _, w := range resolved.Warnings {
-			fmt.Fprintln(cmd.OutOrStdout(), "warning:", w)
+			if _, err := fmt.Fprintln(rw, "warning:", w); err != nil {
+				return err
+			}
 		}
-		fmt.Fprintf(cmd.OutOrStdout(), "%s: valid (%d steps, secrets resolve)\n", MainFile, len(resolved.Main.Steps))
-		return nil
+
+		_, err = fmt.Fprintf(rw, "%s: valid (%d steps, secrets resolve)\n", MainFile, len(resolved.Main.Steps))
+		return err
 	},
 }
 

@@ -5,6 +5,7 @@ import (
 	"encoding/csv"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 
 	"github.com/datasplice-labs/datasplice-core/internal/contract"
@@ -17,15 +18,19 @@ import (
 // explicit with.columns config yet. Add it if a source's key order needs
 // to be preserved, or if callers need to force a fixed column set.
 type CSV struct {
-	path string
+	path   string
+	atomic bool
 }
 
 func NewCSV() *CSV { return &CSV{} }
 
 func (c *CSV) Describe() contract.Describe {
 	return contract.Describe{
-		Name: "csv", Version: "0.1.0", Role: contract.RoleSink,
-		Settings: []contract.SettingSpec{{Key: "path", Type: "string", Required: true}},
+		Name: "csv", Version: "0.1.0", Roles: []contract.Role{contract.RoleSink},
+		Settings: []contract.SettingSpec{
+			{Key: "path", Type: "string", Required: true},
+			{Key: "atomic", Type: "bool"},
+		},
 	}
 }
 
@@ -40,17 +45,46 @@ func (c *CSV) Configure(settings map[string]any, fn string, on []string, secrets
 	}
 
 	c.path = path
+	c.atomic, _ = settings["atomic"].(bool)
 
 	return nil
 }
 
-func (c *CSV) Process(ctx context.Context, in <-chan contract.Batch, out chan<- contract.Batch) error {
-	f, err := os.Create(c.path)
+// writePath is where rows actually land: the real target, or — when
+// atomic — a temp file in the same directory that Process renames over
+// the target only once every row has been written successfully.
+func (c *CSV) Process(ctx context.Context, in <-chan contract.Batch, out chan<- contract.Batch) (err error) {
+	writePath := c.path
+	var f *os.File
+	if c.atomic {
+		f, err = os.CreateTemp(filepath.Dir(c.path), ".datasplice-tmp-*")
+	} else {
+		f, err = os.Create(c.path)
+	}
 	if err != nil {
 		return fmt.Errorf("csv: %w", err)
 	}
 
-	defer f.Close()
+	if c.atomic {
+		writePath = f.Name()
+	}
+
+	defer func() {
+		if cerr := f.Close(); err == nil {
+			err = cerr
+		}
+
+		if !c.atomic {
+			return
+		}
+
+		if err != nil {
+			_ = os.Remove(writePath)
+			return
+		}
+
+		err = os.Rename(writePath, c.path)
+	}()
 
 	w := csv.NewWriter(f)
 	defer w.Flush()
