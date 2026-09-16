@@ -38,12 +38,60 @@ type Secrets struct {
 	Values   map[string]string `yaml:"values,omitempty"` // plain only
 }
 
-// Main is main.yaml. Four top-level keys and nothing else — unknown
-// fields are rejected (see decodeStrict).
+const (
+	OnErrorFail       = "fail"
+	OnErrorSkipRecord = "skip_record"
+
+	ModeRecord     = "record"
+	ModeBulk       = "bulk"
+	ModeConcurrent = "concurrent"
+)
+
+// (.docs/getting-started/file-structure.md "config").
+// Config mirrors the flow-level `config:` block
+type Config struct {
+	OnError  string `yaml:"on_error,omitempty"`
+	Mode     string `yaml:"mode,omitempty"`
+	LogLevel string `yaml:"log_level,omitempty"`
+}
+
+var validLogLevels = map[string]bool{"error": true, "warn": true, "info": true, "debug": true}
+
+func defaultConfig() *Config {
+	return &Config{OnError: OnErrorFail, Mode: ModeRecord, LogLevel: "info"}
+}
+
+func validateConfig(c *Config, path string) error {
+	switch c.OnError {
+	case OnErrorFail:
+	case OnErrorSkipRecord:
+		return fmt.Errorf("%s: config.on_error: %q is not implemented yet (%q supported only)", path, OnErrorSkipRecord, OnErrorFail)
+	default:
+		return fmt.Errorf("%s: config.on_error: %q is invalid (want: %q | %q)", path, c.OnError, OnErrorFail, OnErrorSkipRecord)
+	}
+
+	switch c.Mode {
+	case ModeRecord:
+	case ModeBulk, ModeConcurrent:
+		return fmt.Errorf("%s: config.mode: %q is not implemented yet (%q supported only)", path, c.Mode, ModeRecord)
+	default:
+		return fmt.Errorf("%s: config.mode: %q is invalid (want: %q | %q | %q)", path, c.Mode, ModeRecord, ModeBulk, ModeConcurrent)
+	}
+
+	if !validLogLevels[c.LogLevel] {
+		return fmt.Errorf("%s: config.log_level: %q is invalid (want: error | warn | info | debug)", path, c.LogLevel)
+	}
+
+	return nil
+}
+
+// Main is main.yaml. Unknown top-level fields are rejected (see
+// decodeStrict).
 type Main struct {
 	Name     string         `yaml:"name"`
 	Steps    []Step         `yaml:"steps"`
 	Secrets  *Secrets       `yaml:"secrets,omitempty"`
+	Config   *Config        `yaml:"config,omitempty"`
 	Settings map[string]any `yaml:"settings,omitempty"` // reserved for state backend config; unused so far
 }
 
@@ -83,6 +131,26 @@ func LoadMain(path string) (*Main, error) {
 		if s.Uses == "" {
 			return nil, fmt.Errorf("%s: step %d: `uses` is required", path, i+1)
 		}
+	}
+
+	if m.Config == nil {
+		m.Config = defaultConfig()
+	} else {
+		if m.Config.OnError == "" {
+			m.Config.OnError = OnErrorFail
+		}
+
+		if m.Config.Mode == "" {
+			m.Config.Mode = ModeRecord
+		}
+
+		if m.Config.LogLevel == "" {
+			m.Config.LogLevel = "info"
+		}
+	}
+
+	if err := validateConfig(m.Config, path); err != nil {
+		return nil, err
 	}
 
 	return &m, nil
