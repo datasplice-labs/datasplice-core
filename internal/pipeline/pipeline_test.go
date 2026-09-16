@@ -54,6 +54,47 @@ func TestEndToEndJSONMapCSV(t *testing.T) {
 	}
 }
 
+// TestEndToEndJSONAsSink covers datasplice-prd-tasks.md T3.10: json can
+// act as the last step (sink), not just the first (source) — the same
+// package, chosen by position, per contract.Role's doc comment.
+func TestEndToEndJSONAsSink(t *testing.T) {
+	dir := t.TempDir()
+	inPath := filepath.Join(dir, "in.json")
+	outPath := filepath.Join(dir, "out.json")
+
+	if err := os.WriteFile(inPath, []byte(`[{"id": 1, "name": "Ada"}]`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m := &config.Main{
+		Name: "json-sink",
+		Steps: []config.Step{
+			{Uses: "datasplice/json@latest", With: map[string]any{"path": inPath}},
+			{Uses: "datasplice/json@latest", With: map[string]any{"path": outPath}},
+		},
+	}
+
+	steps, err := Build(m, nil)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if err := Configure(steps); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+	if err := Run(context.Background(), steps); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	got, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("reading output: %v", err)
+	}
+	want := `[{"id":1,"name":"Ada"}]`
+	if string(got) != want {
+		t.Fatalf("json output = %q, want %q", got, want)
+	}
+}
+
 func TestBuildRejectsBadShape(t *testing.T) {
 	m := &config.Main{
 		Name: "bad",

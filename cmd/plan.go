@@ -31,7 +31,7 @@ var planCmd = &cobra.Command{
 			return err
 		}
 		for i, s := range steps {
-			if _, err := fmt.Fprintf(rw, "  %d  %-10s %-10s %s\n", i+1, s.Describe.Name, s.Describe.Role, s.Uses); err != nil {
+			if _, err := fmt.Fprintf(rw, "  %d  %-10s %-10s %s\n", i+1, s.Describe.Name, s.Role, s.Uses); err != nil {
 				return err
 			}
 		}

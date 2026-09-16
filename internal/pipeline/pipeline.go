@@ -16,10 +16,14 @@ import (
 // Step is one resolved, described stage — a package instance plus its
 // interpolated settings, ready for Configure.
 type Step struct {
-	ID       string
-	Uses     string
-	Pkg      contract.Package
+	ID   string
+	Uses string
+	Pkg  contract.Package
+	// Describe is the package's full capability set. Role is the one role
+	// this step actually plays, derived from its position (a package that
+	// declares more than one, like json, has no other way to say which).
 	Describe contract.Describe
+	Role     contract.Role
 	With     map[string]any
 	Fn       string
 	On       []string
@@ -65,6 +69,7 @@ func Build(m *config.Main, secretValues map[string]string) ([]Step, error) {
 			Uses:     s.Uses,
 			Pkg:      pkg,
 			Describe: d,
+			Role:     positionRole(i, len(m.Steps)),
 			With:     with,
 			Fn:       s.Fn,
 			On:       s.On,
@@ -85,19 +90,33 @@ func Build(m *config.Main, secretValues map[string]string) ([]Step, error) {
 	return steps, nil
 }
 
+// positionRole is the role a step must play given its position: first is
+// always source, last is always sink, everything between is transform.
+// checkShape verifies the resolved package actually supports it.
+func positionRole(i, n int) contract.Role {
+	switch i {
+	case 0:
+		return contract.RoleSource
+	case n - 1:
+		return contract.RoleSink
+	default:
+		return contract.RoleTransform
+	}
+}
+
 func checkShape(steps []Step) error {
 	n := len(steps)
-	if steps[0].Describe.Role != contract.RoleSource {
-		return fmt.Errorf("step 1 (%s) must be a source, got %s", steps[0].Uses, steps[0].Describe.Role)
+	if !steps[0].Describe.HasRole(contract.RoleSource) {
+		return fmt.Errorf("step 1 (%s) must be a source, got %s", steps[0].Uses, steps[0].Describe.RolesString())
 	}
 
-	if steps[n-1].Describe.Role != contract.RoleSink {
-		return fmt.Errorf("step %d (%s) must be a sink, got %s", n, steps[n-1].Uses, steps[n-1].Describe.Role)
+	if !steps[n-1].Describe.HasRole(contract.RoleSink) {
+		return fmt.Errorf("step %d (%s) must be a sink, got %s", n, steps[n-1].Uses, steps[n-1].Describe.RolesString())
 	}
 
 	for i := 1; i < n-1; i++ {
-		if steps[i].Describe.Role != contract.RoleTransform {
-			return fmt.Errorf("step %d (%s) must be a transform, got %s", i+1, steps[i].Uses, steps[i].Describe.Role)
+		if !steps[i].Describe.HasRole(contract.RoleTransform) {
+			return fmt.Errorf("step %d (%s) must be a transform, got %s", i+1, steps[i].Uses, steps[i].Describe.RolesString())
 		}
 	}
 
@@ -106,7 +125,7 @@ func checkShape(steps []Step) error {
 
 func checkFunctions(steps []Step) error {
 	for i, s := range steps {
-		if s.Describe.Role != contract.RoleTransform {
+		if s.Role != contract.RoleTransform {
 			if s.Fn != "" || len(s.On) > 0 {
 				return fmt.Errorf("step %d (%s): `fn`/`on` are only valid on transform steps", i+1, s.Uses)
 			}
@@ -194,7 +213,8 @@ func RunDryRun(ctx context.Context, steps []Step) (count int, sample []record.Re
 	dsSteps := append([]Step{}, steps[:len(steps)-1]...)
 	dsSteps = append(dsSteps, Step{
 		ID: steps[len(steps)-1].ID, Uses: "dry-run", Pkg: c,
-		Describe: contract.Describe{Name: "dry-run", Role: contract.RoleSink},
+		Describe: contract.Describe{Name: "dry-run", Roles: []contract.Role{contract.RoleSink}},
+		Role:     contract.RoleSink,
 	})
 	err = Run(ctx, dsSteps)
 	return c.count, c.sample, err
@@ -208,7 +228,7 @@ type dryRunSink struct {
 }
 
 func (d *dryRunSink) Describe() contract.Describe {
-	return contract.Describe{Name: "dry-run", Role: contract.RoleSink}
+	return contract.Describe{Name: "dry-run", Roles: []contract.Role{contract.RoleSink}}
 }
 
 func (d *dryRunSink) Configure(map[string]any, string, []string, map[string]string) error { return nil }

@@ -37,7 +37,7 @@ func NewHTTP() *HTTP { return &HTTP{} }
 
 func (h *HTTP) Describe() contract.Describe {
 	return contract.Describe{
-		Name: "http", Version: "0.1.0", Role: contract.RoleSource,
+		Name: "http", Version: "0.1.0", Roles: []contract.Role{contract.RoleSource},
 		Settings: []contract.SettingSpec{{Key: "url", Type: "string", Required: true}},
 	}
 }
