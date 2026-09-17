@@ -14,7 +14,7 @@ func TestJSONWriteRoundTripsThroughRead(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "out.json")
 
 	w := NewJSON()
-	if err := w.Configure(map[string]any{"path": path}, "", nil, nil); err != nil {
+	if err := w.Configure(map[string]any{"path": path}, nil); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 
@@ -40,7 +40,7 @@ func TestJSONWriteRoundTripsThroughRead(t *testing.T) {
 	}
 
 	r := NewJSON()
-	if err := r.Configure(map[string]any{"path": path}, "", nil, nil); err != nil {
+	if err := r.Configure(map[string]any{"path": path}, nil); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 
@@ -64,7 +64,7 @@ func TestJSONAtomicWriteSucceeds(t *testing.T) {
 	path := filepath.Join(dir, "out.json")
 
 	w := NewJSON()
-	if err := w.Configure(map[string]any{"path": path, "atomic": true}, "", nil, nil); err != nil {
+	if err := w.Configure(map[string]any{"path": path, "atomic": true}, nil); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 

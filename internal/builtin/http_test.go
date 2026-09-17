@@ -41,7 +41,7 @@ func TestHTTPCursorPaginationAndAuth(t *testing.T) {
 		"auth":         map[string]any{"type": "bearer", "token": "tok"},
 		"records_path": "items",
 		"pagination":   map[string]any{"type": "cursor", "field": "next"},
-	}, "", nil, nil); err != nil {
+	}, nil); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 	if !h.Describe().HasRole(contract.RoleSource) {

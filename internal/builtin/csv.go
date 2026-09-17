@@ -34,7 +34,7 @@ func (c *CSV) Describe() contract.Describe {
 	}
 }
 
-func (c *CSV) Configure(settings map[string]any, fn string, on []string, secrets map[string]string) error {
+func (c *CSV) Configure(settings map[string]any, secrets map[string]string) error {
 	path, ok := settings["path"].(string)
 	if !ok {
 		return fmt.Errorf("csv: `with.path` must be a string")

@@ -42,7 +42,7 @@ func (h *HTTP) Describe() contract.Describe {
 	}
 }
 
-func (h *HTTP) Configure(settings map[string]any, fn string, on []string, secrets map[string]string) error {
+func (h *HTTP) Configure(settings map[string]any, secrets map[string]string) error {
 	u, ok := settings["url"].(string)
 	if !ok {
 		return fmt.Errorf("http: `with.url` must be a string")

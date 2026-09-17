@@ -25,8 +25,8 @@ func newExportingPackage(inner contract.Package, export *config.Export) contract
 
 func (e *exportingPackage) Describe() contract.Describe { return e.inner.Describe() }
 
-func (e *exportingPackage) Configure(settings map[string]any, fn string, on []string, secrets map[string]string) error {
-	return e.inner.Configure(settings, fn, on, secrets)
+func (e *exportingPackage) Configure(settings map[string]any, secrets map[string]string) error {
+	return e.inner.Configure(settings, secrets)
 }
 
 func (e *exportingPackage) Process(ctx context.Context, in <-chan contract.Batch, out chan<- contract.Batch) error {

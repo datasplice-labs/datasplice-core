@@ -23,11 +23,7 @@ func (m *Map) Describe() contract.Describe {
 	return contract.Describe{Name: "map", Version: "0.1.0", Roles: []contract.Role{contract.RoleTransform}}
 }
 
-func (m *Map) Configure(settings map[string]any, fn string, on []string, secrets map[string]string) error {
-	if fn != "" {
-		return fmt.Errorf("map: does not declare any functions, got fn=%q", fn)
-	}
-
+func (m *Map) Configure(settings map[string]any, secrets map[string]string) error {
 	if sel, ok := settings["select"].([]any); ok {
 		for _, s := range sel {
 			if str, ok := s.(string); ok {
@@ -106,7 +102,9 @@ func (m *Map) apply(rec record.Record) (record.Record, error) {
 			}
 			v = converted
 		}
-		out.Set(name, v)
+		if err := out.Set(name, v); err != nil {
+			return nil, fmt.Errorf("rename %q: %w", k, err)
+		}
 	}
 	return out, nil
 }

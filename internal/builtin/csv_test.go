@@ -16,7 +16,7 @@ func TestCSVAtomicWriteSucceeds(t *testing.T) {
 	path := filepath.Join(dir, "out.csv")
 
 	c := NewCSV()
-	if err := c.Configure(map[string]any{"path": path, "atomic": true}, "", nil, nil); err != nil {
+	if err := c.Configure(map[string]any{"path": path, "atomic": true}, nil); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 
@@ -45,7 +45,7 @@ func TestCSVAtomicWriteFailureLeavesNoFile(t *testing.T) {
 	path := filepath.Join(dir, "out.csv")
 
 	c := NewCSV()
-	if err := c.Configure(map[string]any{"path": path, "atomic": true}, "", nil, nil); err != nil {
+	if err := c.Configure(map[string]any{"path": path, "atomic": true}, nil); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 

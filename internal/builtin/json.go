@@ -36,7 +36,7 @@ func (j *JSON) Describe() contract.Describe {
 	}
 }
 
-func (j *JSON) Configure(settings map[string]any, fn string, on []string, secrets map[string]string) error {
+func (j *JSON) Configure(settings map[string]any, secrets map[string]string) error {
 	path, _ := settings["path"].(string)
 	if path == "" {
 		return fmt.Errorf("json: `with.path` is required")

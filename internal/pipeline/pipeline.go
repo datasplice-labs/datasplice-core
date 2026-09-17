@@ -25,8 +25,6 @@ type Step struct {
 	Describe contract.Describe
 	Role     contract.Role
 	With     map[string]any
-	Fn       string
-	On       []string
 	Secrets  map[string]string
 }
 
@@ -71,19 +69,12 @@ func Build(m *config.Main, secretValues map[string]string) ([]Step, error) {
 			Describe: d,
 			Role:     positionRole(i, len(m.Steps)),
 			With:     with,
-			Fn:       s.Fn,
-			On:       s.On,
 			Secrets:  config.ReferencedValues(s.With, secretValues),
 		}
 	}
 
 	// We have built the steps package. Now we check its shape and rules
 	if err := checkShape(steps); err != nil {
-		return nil, err
-	}
-
-	// Checking functions (to be deprecated)
-	if err := checkFunctions(steps); err != nil {
 		return nil, err
 	}
 
@@ -123,35 +114,10 @@ func checkShape(steps []Step) error {
 	return nil
 }
 
-func checkFunctions(steps []Step) error {
-	for i, s := range steps {
-		if s.Role != contract.RoleTransform {
-			if s.Fn != "" || len(s.On) > 0 {
-				return fmt.Errorf("step %d (%s): `fn`/`on` are only valid on transform steps", i+1, s.Uses)
-			}
-			continue
-		}
-		if s.Fn == "" {
-			continue
-		}
-		found := false
-		for _, f := range s.Describe.Functions {
-			if f.Name == s.Fn {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return fmt.Errorf("step %d (%s): unknown fn %q", i+1, s.Uses, s.Fn)
-		}
-	}
-	return nil
-}
-
 // Configure calls Configure exactly once per step, in order.
 func Configure(steps []Step) error {
 	for _, s := range steps {
-		if err := s.Pkg.Configure(s.With, s.Fn, s.On, s.Secrets); err != nil {
+		if err := s.Pkg.Configure(s.With, s.Secrets); err != nil {
 			return fmt.Errorf("%s: %w", s.ID, err)
 		}
 	}
@@ -162,10 +128,15 @@ func Configure(steps []Step) error {
 // all of them. The sink closing its output — implicit here when its
 // Process returns — is the commit signal.
 // Any step's error cancels the shared context, which every other step's
-// Process must observe to unblock its channel sends.
-func Run(ctx context.Context, steps []Step) error {
+// Process must observe to unblock its channel sends. The returned count is
+// how many records reached the sink — 0 alongside a non-nil error.
+func Run(ctx context.Context, steps []Step) (count int, err error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+
+	steps = append([]Step{}, steps...)
+	last := len(steps) - 1
+	steps[last].Pkg = &countingSink{inner: steps[last].Pkg, count: &count}
 
 	chans := make([]chan contract.Batch, len(steps)-1)
 	for i := range chans {
@@ -198,12 +169,12 @@ func Run(ctx context.Context, steps []Step) error {
 	}
 	wg.Wait()
 	close(errs)
-	for err := range errs {
-		if err != nil {
-			return err
+	for e := range errs {
+		if e != nil {
+			return 0, e
 		}
 	}
-	return nil
+	return count, nil
 }
 
 // RunDryRun runs the full pipeline but swaps the sink for a counter that
@@ -216,7 +187,7 @@ func RunDryRun(ctx context.Context, steps []Step) (count int, sample []record.Re
 		Describe: contract.Describe{Name: "dry-run", Roles: []contract.Role{contract.RoleSink}},
 		Role:     contract.RoleSink,
 	})
-	err = Run(ctx, dsSteps)
+	_, err = Run(ctx, dsSteps)
 	return c.count, c.sample, err
 }
 
@@ -231,7 +202,7 @@ func (d *dryRunSink) Describe() contract.Describe {
 	return contract.Describe{Name: "dry-run", Roles: []contract.Role{contract.RoleSink}}
 }
 
-func (d *dryRunSink) Configure(map[string]any, string, []string, map[string]string) error { return nil }
+func (d *dryRunSink) Configure(map[string]any, map[string]string) error { return nil }
 
 func (d *dryRunSink) Process(ctx context.Context, in <-chan contract.Batch, out chan<- contract.Batch) error {
 	for {

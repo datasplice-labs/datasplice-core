@@ -11,20 +11,16 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Step is the one shape every step has: `uses` plus `with`, and
-// optionally `fn`/`on` for transforms. Role comes from the package's
-// Describe response, not from which keys are set.
+// Step is the one shape every step has: `uses` plus `with`. Role comes
+// from the package's Describe response, not from which keys are set.
 type Step struct {
 	Uses   string         `yaml:"uses"`
 	With   map[string]any `yaml:"with,omitempty"`
-	Fn     string         `yaml:"fn,omitempty"`
-	On     []string       `yaml:"on,omitempty"`
 	Export *Export        `yaml:"export,omitempty"`
 }
 
-// Export mirrors a step's `export:` block (docs/getting-started/
-// file-structure.md "export"). Not valid on the last step — a sink has
-// nothing downstream to receive it (checked in pipeline.Build).
+// Export mirrors a step's `export:` block. Not valid on the last step:
+// a sink has nothing downstream to receive it (checked in pipeline.Build).
 type Export struct {
 	Passthrough bool              `yaml:"passthrough,omitempty"`
 	Values      map[string]string `yaml:"values,omitempty"`
