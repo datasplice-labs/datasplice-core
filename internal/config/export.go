@@ -43,7 +43,10 @@ func (e *Export) Apply(in, out record.Record) (record.Record, error) {
 		if !ok {
 			return nil, fmt.Errorf("export: value %q for %q: path not found", path, name)
 		}
-		result.Set(name, v)
+
+		if err := result.Set(name, v); err != nil {
+			return nil, err
+		}
 	}
 
 	return result, nil
