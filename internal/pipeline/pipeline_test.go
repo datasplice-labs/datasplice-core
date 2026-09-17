@@ -40,8 +40,12 @@ func TestEndToEndJSONMapCSV(t *testing.T) {
 	if err := Configure(steps); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
-	if err := Run(context.Background(), steps); err != nil {
+	count, err := Run(context.Background(), steps)
+	if err != nil {
 		t.Fatalf("Run: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("count = %d, want 2", count)
 	}
 
 	got, err := os.ReadFile(outPath)
@@ -81,7 +85,7 @@ func TestEndToEndJSONAsSink(t *testing.T) {
 	if err := Configure(steps); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
-	if err := Run(context.Background(), steps); err != nil {
+	if _, err := Run(context.Background(), steps); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
@@ -149,7 +153,7 @@ func TestExportOnSourceStep(t *testing.T) {
 	if err := Configure(steps); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
-	if err := Run(context.Background(), steps); err != nil {
+	if _, err := Run(context.Background(), steps); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
@@ -194,7 +198,7 @@ func TestExportOnTransformStep(t *testing.T) {
 	if err := Configure(steps); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
-	if err := Run(context.Background(), steps); err != nil {
+	if _, err := Run(context.Background(), steps); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
@@ -205,6 +209,40 @@ func TestExportOnTransformStep(t *testing.T) {
 	want := "name,original_id\nAda,1\n"
 	if string(got) != want {
 		t.Fatalf("csv output = %q, want %q", got, want)
+	}
+}
+
+// TestRunReturnsZeroCountOnError covers Run's documented contract: 0
+// alongside a non-nil error, never a partial count.
+func TestRunReturnsZeroCountOnError(t *testing.T) {
+	dir := t.TempDir()
+	inPath := filepath.Join(dir, "in.json")
+	if err := os.WriteFile(inPath, []byte(`[{"id": 1}]`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m := &config.Main{
+		Name: "bad-sink-path",
+		Steps: []config.Step{
+			{Uses: "datasplice/json@latest", With: map[string]any{"path": inPath}},
+			// a directory can't be opened as a file: Process fails immediately
+			{Uses: "datasplice/csv@latest", With: map[string]any{"path": dir}},
+		},
+	}
+
+	steps, err := Build(m, nil)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if err := Configure(steps); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+	count, err := Run(context.Background(), steps)
+	if err == nil {
+		t.Fatalf("expected an error writing to a directory path")
+	}
+	if count != 0 {
+		t.Fatalf("count = %d, want 0 alongside an error", count)
 	}
 }
 
