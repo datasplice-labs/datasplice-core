@@ -25,8 +25,6 @@ type Step struct {
 	Describe contract.Describe
 	Role     contract.Role
 	With     map[string]any
-	Fn       string
-	On       []string
 	Secrets  map[string]string
 }
 
@@ -71,19 +69,12 @@ func Build(m *config.Main, secretValues map[string]string) ([]Step, error) {
 			Describe: d,
 			Role:     positionRole(i, len(m.Steps)),
 			With:     with,
-			Fn:       s.Fn,
-			On:       s.On,
 			Secrets:  config.ReferencedValues(s.With, secretValues),
 		}
 	}
 
 	// We have built the steps package. Now we check its shape and rules
 	if err := checkShape(steps); err != nil {
-		return nil, err
-	}
-
-	// Checking functions (to be deprecated)
-	if err := checkFunctions(steps); err != nil {
 		return nil, err
 	}
 
@@ -123,35 +114,10 @@ func checkShape(steps []Step) error {
 	return nil
 }
 
-func checkFunctions(steps []Step) error {
-	for i, s := range steps {
-		if s.Role != contract.RoleTransform {
-			if s.Fn != "" || len(s.On) > 0 {
-				return fmt.Errorf("step %d (%s): `fn`/`on` are only valid on transform steps", i+1, s.Uses)
-			}
-			continue
-		}
-		if s.Fn == "" {
-			continue
-		}
-		found := false
-		for _, f := range s.Describe.Functions {
-			if f.Name == s.Fn {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return fmt.Errorf("step %d (%s): unknown fn %q", i+1, s.Uses, s.Fn)
-		}
-	}
-	return nil
-}
-
 // Configure calls Configure exactly once per step, in order.
 func Configure(steps []Step) error {
 	for _, s := range steps {
-		if err := s.Pkg.Configure(s.With, s.Fn, s.On, s.Secrets); err != nil {
+		if err := s.Pkg.Configure(s.With, s.Secrets); err != nil {
 			return fmt.Errorf("%s: %w", s.ID, err)
 		}
 	}
@@ -162,61 +128,100 @@ func Configure(steps []Step) error {
 // all of them. The sink closing its output — implicit here when its
 // Process returns — is the commit signal.
 // Any step's error cancels the shared context, which every other step's
-// Process must observe to unblock its channel sends.
-func Run(ctx context.Context, steps []Step) error {
+// Process must observe to unblock its channel sends. The returned count is
+// how many records reached the sink — 0 alongside a non-nil error.
+func Run(ctx context.Context, steps []Step) (count int, err error) {
+	// we cancel() whenever we return, and if any step's goroutine below errors
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
+	// Copy steps before mutating it. Steps is caller-owned
+	// Build's caller may reuse the same slice for another Run (e.g. run vs. --dry-run),
+	// so we shouldn't mutate their copy in place
+	steps = append([]Step{}, steps...)
+	last := len(steps) - 1
+
+	// count is a named return value; countingSink writes into it via the
+	// pointer as records flow through, so it's already populated by the
+	// time this function returns
+	steps[last].Pkg = &countingSink{inner: steps[last].Pkg, count: &count}
+
+	// One channel between each pair of adjacent steps: step i writes to chans[i],
+	// step i+1 reads from it. Buffered (4) so a step doesn't have to wait for
+	// its downstream neighbour to be ready for every single batch.
+	// This is the only backpressure/decoupling mechanism between steps right now
 	chans := make([]chan contract.Batch, len(steps)-1)
 	for i := range chans {
 		chans[i] = make(chan contract.Batch, 4)
 	}
 
+	// Run every step concurrently, each in its own goroutine, wired to
+	// its neighbours via the channels above. wg tracks when they've all
+	// finished; errs collects whichever ones failed (buffered to the
+	// number of steps so no goroutine can block trying to report an
+	// error, even if several fail at once).
 	var wg sync.WaitGroup
 	errs := make(chan error, len(steps))
 	for i, s := range steps {
 		var in <-chan contract.Batch
 		var out chan<- contract.Batch
 		if i > 0 {
-			in = chans[i-1]
+			in = chans[i-1] // every step but the first reads from the previous step's channel
 		}
 		if i < len(steps)-1 {
-			out = chans[i]
+			out = chans[i] // every step but the last writes to its own channel
 		}
 
 		wg.Add(1)
 		go func(s Step, in <-chan contract.Batch, out chan<- contract.Batch) {
 			defer wg.Done()
+			// Closing `out` is how this step tells the next one "no more batches coming"
+			// the next step's `for batch := range in`(or equivalent select loop) sees
+			// the channel close and knows to stop. Only steps with a downstream neighbour
+			// (out != nil) need to do this; the last step's out is nil.
 			if out != nil {
 				defer close(out)
 			}
+
 			if err := s.Pkg.Process(ctx, in, out); err != nil {
 				errs <- fmt.Errorf("%s: %w", s.ID, err)
-				cancel()
+				cancel() // stop every other step, not just this one
 			}
 		}(s, in, out)
 	}
+
+	// Block until every step's goroutine has returned (successfully or
+	// not) before looking at results.
 	wg.Wait()
 	close(errs)
-	for err := range errs {
-		if err != nil {
-			return err
+	for e := range errs {
+		if e != nil {
+			return 0, e
 		}
 	}
-	return nil
+	return count, nil
 }
 
 // RunDryRun runs the full pipeline but swaps the sink for a counter that
 // keeps a small sample instead of writing (datasplice-core-prd.md §3).
 func RunDryRun(ctx context.Context, steps []Step) (count int, sample []record.Record, err error) {
 	c := &dryRunSink{}
-	dsSteps := append([]Step{}, steps[:len(steps)-1]...)
-	dsSteps = append(dsSteps, Step{
+	// Take every step except the real sink, then append our own
+	// dryRunSink in its place — same position (last), so it still gets
+	// wired up as the sink by Run below, it just doesn't write anywhere.
+	dryRunSinkSteps := append([]Step{}, steps[:len(steps)-1]...)
+	dryRunSinkSteps = append(dryRunSinkSteps, Step{
 		ID: steps[len(steps)-1].ID, Uses: "dry-run", Pkg: c,
 		Describe: contract.Describe{Name: "dry-run", Roles: []contract.Role{contract.RoleSink}},
 		Role:     contract.RoleSink,
 	})
-	err = Run(ctx, dsSteps)
+
+	// Run also wraps our dryRunSink in its own countingSink internally,
+	// which would double-count — we ignore that returned count and use
+	// c.count (dryRunSink's own tally) instead, since dryRunSink also
+	// keeps the sample, and we want both numbers from the same source.
+	_, err = Run(ctx, dryRunSinkSteps)
+
 	return c.count, c.sample, err
 }
 
@@ -231,14 +236,17 @@ func (d *dryRunSink) Describe() contract.Describe {
 	return contract.Describe{Name: "dry-run", Roles: []contract.Role{contract.RoleSink}}
 }
 
-func (d *dryRunSink) Configure(map[string]any, string, []string, map[string]string) error { return nil }
+func (d *dryRunSink) Configure(map[string]any, map[string]string) error { return nil }
 
 func (d *dryRunSink) Process(ctx context.Context, in <-chan contract.Batch, out chan<- contract.Batch) error {
+	// A sink's Process just needs to keep draining `in` until it's
+	// closed (upstream is done) or ctx is cancelled (something else
+	// failed). No out to write to here — dryRunSink never emits anything.
 	for {
 		select {
 		case batch, ok := <-in:
 			if !ok {
-				return nil
+				return nil // upstream closed cleanly: we're done
 			}
 			d.count += len(batch)
 			for _, r := range batch {

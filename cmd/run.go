@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"time"
 
 	"github.com/datasplice-labs/datasplice-core/internal/config"
 	"github.com/datasplice-labs/datasplice-core/internal/pipeline"
@@ -37,6 +38,9 @@ var runCmd = &cobra.Command{
 			return err
 		}
 
+		// Wraps ctx so Ctrl-C cancels it instead of killing the process outright
+		// that's what every step's Process is already watching for via ctx.Done(),
+		// so this is what makes an interrupt shut the pipeline down cleanly.
 		ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt)
 		defer stop()
 
@@ -58,7 +62,13 @@ var runCmd = &cobra.Command{
 			return nil
 		}
 
-		return pipeline.Run(ctx, steps)
+		start := time.Now()
+		count, err := pipeline.Run(ctx, steps)
+		if err != nil {
+			return err
+		}
+		_, err = fmt.Fprintf(rw, "✓ %d records in %.1fs\n", count, time.Since(start).Seconds())
+		return err
 	},
 }
 

@@ -46,24 +46,6 @@ func (r Role) String() string {
 	}
 }
 
-// Kind mirrors datasplice.v1.Kind — only meaningful on a Function.
-type Kind int
-
-const (
-	KindUnspecified Kind = iota
-	KindMap              // 1 -> 1
-	KindFilter           // 1 -> 0 or 1
-	KindReduce           // N -> 1; buffers, emits after input closes
-)
-
-// Function mirrors datasplice.v1.Function — a named `fn:` a transform
-// step can target.
-type Function struct {
-	Name    string
-	Kind    Kind
-	Accepts []string
-}
-
 // SettingSpec mirrors datasplice.v1.SettingSpec. Optional; a package that
 // declares these gets its `with:` block schema-checked before it runs.
 type SettingSpec struct {
@@ -76,11 +58,10 @@ type SettingSpec struct {
 // Describe mirrors datasplice.v1.DescribeResponse. Must be answerable
 // without Configure ever having been called.
 type Describe struct {
-	Name      string
-	Version   string
-	Roles     []Role
-	Functions []Function
-	Settings  []SettingSpec
+	Name     string
+	Version  string
+	Roles    []Role
+	Settings []SettingSpec
 }
 
 // HasRole reports whether the package can act as r.
@@ -116,7 +97,7 @@ type Package interface {
 	// Configure is called exactly once, before Process. settings is the
 	// step's `with:` block after interpolation; secrets holds only the
 	// values this step referenced (datasplice-protocol.md §3).
-	Configure(settings map[string]any, fn string, on []string, secrets map[string]string) error
+	Configure(settings map[string]any, secrets map[string]string) error
 
 	Process(ctx context.Context, in <-chan Batch, out chan<- Batch) error
 }

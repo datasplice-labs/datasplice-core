@@ -42,7 +42,7 @@ func (h *HTTP) Describe() contract.Describe {
 	}
 }
 
-func (h *HTTP) Configure(settings map[string]any, fn string, on []string, secrets map[string]string) error {
+func (h *HTTP) Configure(settings map[string]any, secrets map[string]string) error {
 	u, ok := settings["url"].(string)
 	if !ok {
 		return fmt.Errorf("http: `with.url` must be a string")
@@ -108,11 +108,20 @@ func (h *HTTP) configureAuth(auth map[string]any) error {
 	return nil
 }
 
+// Process fetches one page at a time, in a loop, until nextURL says
+// there's nothing more to follow (empty reqURL). There's no goroutine
+// here — HTTP is a source with nothing upstream, so it just fetches,
+// emits, fetches again, sequentially, at whatever pace rate-limiting and
+// the remote server allow.
 func (h *HTTP) Process(ctx context.Context, in <-chan contract.Batch, out chan<- contract.Batch) error {
 	reqURL := h.url
 	var lastReq time.Time
 	page := 1
 	for reqURL != "" {
+		// Rate limiting: if we already made a request and it hasn't
+		// been minInterval yet, sleep out the remainder before firing
+		// the next one. The select lets a cancellation interrupt the
+		// wait instead of blocking it out to the end.
 		if h.minInterval > 0 && !lastReq.IsZero() {
 			if wait := h.minInterval - time.Since(lastReq); wait > 0 {
 				select {
@@ -135,6 +144,9 @@ func (h *HTTP) Process(ctx context.Context, in <-chan contract.Batch, out chan<-
 		}
 		root, _ := doc.(map[string]any)
 
+		// Emit this page's records as one batch downstream. Skipped
+		// entirely if the page had none, so an empty page never produces
+		// an empty batch on the channel.
 		items := extractRecords(root, doc, h.recordsPath)
 		if len(items) > 0 {
 			select {
@@ -144,6 +156,9 @@ func (h *HTTP) Process(ctx context.Context, in <-chan contract.Batch, out chan<-
 			}
 		}
 
+		// Work out the next URL to fetch (if any) from this response —
+		// reqURL becomes "" when pagination says we're done, which ends
+		// the loop.
 		reqURL, page, err = h.nextURL(root, reqURL, page, len(items) > 0)
 		if err != nil {
 			return fmt.Errorf("http: %w", err)

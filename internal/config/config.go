@@ -11,20 +11,16 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Step is the one shape every step has: `uses` plus `with`, and
-// optionally `fn`/`on` for transforms. Role comes from the package's
-// Describe response, not from which keys are set.
+// Step is the one shape every step has: `uses` plus `with`. Role comes
+// from the package's Describe response, not from which keys are set.
 type Step struct {
 	Uses   string         `yaml:"uses"`
 	With   map[string]any `yaml:"with,omitempty"`
-	Fn     string         `yaml:"fn,omitempty"`
-	On     []string       `yaml:"on,omitempty"`
 	Export *Export        `yaml:"export,omitempty"`
 }
 
-// Export mirrors a step's `export:` block (docs/getting-started/
-// file-structure.md "export"). Not valid on the last step — a sink has
-// nothing downstream to receive it (checked in pipeline.Build).
+// Export mirrors a step's `export:` block. Not valid on the last step:
+// a sink has nothing downstream to receive it (checked in pipeline.Build).
 type Export struct {
 	Passthrough bool              `yaml:"passthrough,omitempty"`
 	Values      map[string]string `yaml:"values,omitempty"`
@@ -61,6 +57,10 @@ func defaultConfig() *Config {
 	return &Config{OnError: OnErrorFail, Mode: ModeRecord, LogLevel: "info"}
 }
 
+// validateConfig checks each field against what's actually supported
+// today. The empty `case OnErrorFail:` bodies below aren't a mistake —
+// that's the "this value is fine, nothing to do" branch; the switch only
+// exists to catch and explain the other cases.
 func validateConfig(c *Config, path string) error {
 	switch c.OnError {
 	case OnErrorFail:
@@ -133,6 +133,11 @@ func LoadMain(path string) (*Main, error) {
 		}
 	}
 
+	// Fill in defaults for whichever fields the user didn't set, whether
+	// that's because there was no `config:` block at all (m.Config == nil)
+	// or just because one field inside it was left out. Either way,
+	// downstream code (pipeline, cmd) can then assume m.Config and all
+	// of its fields are always populated.
 	if m.Config == nil {
 		m.Config = defaultConfig()
 	} else {

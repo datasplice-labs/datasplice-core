@@ -36,7 +36,7 @@ func (j *JSON) Describe() contract.Describe {
 	}
 }
 
-func (j *JSON) Configure(settings map[string]any, fn string, on []string, secrets map[string]string) error {
+func (j *JSON) Configure(settings map[string]any, secrets map[string]string) error {
 	path, _ := settings["path"].(string)
 	if path == "" {
 		return fmt.Errorf("json: `with.path` is required")
@@ -49,6 +49,11 @@ func (j *JSON) Configure(settings map[string]any, fn string, on []string, secret
 }
 
 func (j *JSON) Process(ctx context.Context, in <-chan contract.Batch, out chan<- contract.Batch) error {
+	// Which side we're playing is decided purely by which channel
+	// pipeline.Run gave us: no upstream (in == nil) means we're first in
+	// the flow, so we're the source and read the file. Otherwise we're
+	// somewhere with an upstream, which for this package only ever means
+	// last (sink), so we drain `in` and write the file.
 	if in == nil {
 		return j.read(ctx, out)
 	}
@@ -67,6 +72,10 @@ func (j *JSON) read(ctx context.Context, out chan<- contract.Batch) error {
 		return fmt.Errorf("json: %s must be a JSON array of objects: %w", j.path, err)
 	}
 
+	// Emit the whole file in fixed-size chunks rather than one giant
+	// batch, so downstream steps can start working before we've finished
+	// reading, and so a later step's buffered channel doesn't need to
+	// hold the entire file in one shot.
 	for i := 0; i < len(records); i += defaultBatchSize {
 		end := min(i+defaultBatchSize, len(records))
 		select {
@@ -83,10 +92,16 @@ func (j *JSON) read(ctx context.Context, out chan<- contract.Batch) error {
 // a closing bracket only the sink's last write could provide.
 func (j *JSON) write(ctx context.Context, in <-chan contract.Batch) error {
 	var records []record.Record
+	// Keep draining `in` and accumulating every record in memory — we
+	// can't write anything to disk until we've seen the whole stream and
+	// know where the closing `]` goes.
 	for {
 		select {
 		case batch, ok := <-in:
 			if !ok {
+				// Channel closed: upstream is done, so now — and only
+				// now — do we actually have everything and can marshal
+				// and write the file.
 				data, err := json.Marshal(records)
 				if err != nil {
 					return fmt.Errorf("json: %w", err)
