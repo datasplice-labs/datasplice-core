@@ -52,12 +52,17 @@ func (m *Map) Configure(settings map[string]any, secrets map[string]string) erro
 	return nil
 }
 
+// Process is a straight 1:1 relay: one batch in, one batch out, same
+// length, same order — every record in a batch gets transformed and the
+// whole batch is forwarded together (see exportingPackage in
+// internal/pipeline/export.go, which depends on this exact behaviour to
+// pair up records for export:).
 func (m *Map) Process(ctx context.Context, in <-chan contract.Batch, out chan<- contract.Batch) error {
 	for {
 		select {
 		case batch, ok := <-in:
 			if !ok {
-				return nil
+				return nil // upstream closed: nothing left to transform
 			}
 			result := make(contract.Batch, 0, len(batch))
 			for _, rec := range batch {

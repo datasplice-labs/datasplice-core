@@ -17,12 +17,21 @@ func (e *Export) Apply(in, out record.Record) (record.Record, error) {
 		return out, nil
 	}
 
+	// Build the outgoing record from scratch — we never mutate `in` or
+	// `out` in place, since both may be reused elsewhere (e.g. `out` is
+	// also what a source step emits directly when it has no export:).
 	result := record.Record{}
 	if e.Passthrough {
-		// If the export is Passthrough, we copy the `out` record into the new record.
+		// Start from a copy of everything the step produced. `values`
+		// below can then add to or override individual fields on top of
+		// this starting point.
 		maps.Copy(result, out)
 	}
 
+	// Each entry in `values` is `new_field_name: "in.some.path"` or
+	// `"out.some.path"` — resolve the scope prefix, look the rest of the
+	// path up in the right record, and write it into result under its
+	// new name.
 	for name, path := range e.Values {
 		scope, rest, ok := strings.Cut(path, ".")
 		if !ok {

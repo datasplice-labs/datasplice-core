@@ -57,6 +57,10 @@ func defaultConfig() *Config {
 	return &Config{OnError: OnErrorFail, Mode: ModeRecord, LogLevel: "info"}
 }
 
+// validateConfig checks each field against what's actually supported
+// today. The empty `case OnErrorFail:` bodies below aren't a mistake —
+// that's the "this value is fine, nothing to do" branch; the switch only
+// exists to catch and explain the other cases.
 func validateConfig(c *Config, path string) error {
 	switch c.OnError {
 	case OnErrorFail:
@@ -129,6 +133,11 @@ func LoadMain(path string) (*Main, error) {
 		}
 	}
 
+	// Fill in defaults for whichever fields the user didn't set, whether
+	// that's because there was no `config:` block at all (m.Config == nil)
+	// or just because one field inside it was left out. Either way,
+	// downstream code (pipeline, cmd) can then assume m.Config and all
+	// of its fields are always populated.
 	if m.Config == nil {
 		m.Config = defaultConfig()
 	} else {
