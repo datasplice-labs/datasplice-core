@@ -4,8 +4,14 @@ import (
 	"fmt"
 
 	"github.com/datasplice-labs/datasplice-core/internal/config"
+	"github.com/datasplice-labs/datasplice-core/internal/manifest"
 	"github.com/datasplice-labs/datasplice-core/internal/redact"
 	"github.com/spf13/cobra"
+)
+
+var (
+	// Path to the manifest file to validate, if any.
+	manifestPath string
 )
 
 // validate never resolves packages or touches the network — it only
@@ -15,6 +21,17 @@ var validateCmd = &cobra.Command{
 	Use:   "validate",
 	Short: "Parse and schema-check the flow, without spawning any package",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// --manifest checks a package manifest standalone, for package authors.
+		if manifestPath != "" {
+			m, err := manifest.Load(manifestPath)
+			if err != nil {
+				return err
+			}
+
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "%s: valid (%d actions, manifest_version %d)\n", manifestPath, len(m.Actions), m.ManifestVersion)
+			return err
+		}
+
 		resolved, err := config.LoadAndResolve(MainFile, SecretsFile)
 		if err != nil {
 			return err
@@ -32,5 +49,6 @@ var validateCmd = &cobra.Command{
 }
 
 func init() {
+	validateCmd.Flags().StringVar(&manifestPath, "manifest", "", "validate a package manifest (datasplice.yaml) standalone, without main.yaml")
 	rootCmd.AddCommand(validateCmd)
 }
