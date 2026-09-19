@@ -1,0 +1,7 @@
+name: "x"
+version: "0.1.0"
+manifest_version: 1
+base_url: "https://api.example.com"
+
+# Actions cannot be empty for a manifest
+actions: {}

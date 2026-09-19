@@ -1,0 +1,13 @@
+name: "x"
+version: "0.1.0"
+manifest_version: 1
+base_url: "https://api.example.com"
+settings:
+  subdomain:
+    # This is invalid because the type of a setting can only be a string.
+    type: integer
+actions:
+  list:
+    role: source
+    method: GET
+    path: "/items"

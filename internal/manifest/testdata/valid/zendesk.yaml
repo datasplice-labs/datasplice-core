@@ -1,0 +1,82 @@
+# github.com/myorg/datasplice-zendesk
+
+name: "zendesk"
+version: "0.2.0"
+description: "Zendesk Support API"
+manifest_version: 1
+
+settings:
+  subdomain:
+    type: string
+    required: true
+    description: "Your Zendesk subdomain, e.g. 'acme' for acme.zendesk.com"
+  resource:
+    type: string
+    required: true
+    one_of: [tickets, users, organizations]
+
+secrets:
+  ZENDESK_EMAIL:
+    description: "Email of the API user"
+  ZENDESK_TOKEN:
+    description: "API token from Admin -> Apps and integrations -> APIs"
+
+base_url: "https://{{ settings.subdomain }}.zendesk.com/api/v2"
+
+auth:
+  type: basic
+  username: "{{ secrets.ZENDESK_EMAIL }}/token"
+  password: "{{ secrets.ZENDESK_TOKEN }}"
+
+rate_limit:
+  requests: 200
+  per: minute
+  overrides:
+    incremental_export:
+      requests: 10
+      per: minute
+
+retry:
+  on: [429, 500, 502, 503, 504]
+  respect_retry_after: true
+  max_attempts: 5
+  backoff: exponential
+  initial_delay: 1s
+
+actions:
+  show_many:
+    role: source
+    method: GET
+    path: "/{{ settings.resource }}.json"
+    query:
+      "page[size]": 100
+    records: "$.{{ settings.resource }}"
+    paginate:
+      style: cursor
+      next: "$.links.next"
+      until: "$.meta.has_more == false"
+    fields:
+      contact_reason: "$.custom_fields[?(@.id==360001)].value"
+
+  context:
+    role: transform
+    method: POST
+    path: "/v1/messages"
+    body:
+      model: "{{ settings.model }}"
+      max_tokens: 1024
+      messages:
+        - role: "user"
+          content: "translate this"
+    output:
+      context: "$.content[0].text"
+    batch:
+      default: 1
+      max: 100
+
+  create_many:
+    role: sink
+    method: POST
+    path: "/tickets/create_many.json"
+    body:
+      tickets: "{{ in }}"

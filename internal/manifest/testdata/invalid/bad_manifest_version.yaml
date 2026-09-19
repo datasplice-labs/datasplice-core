@@ -1,0 +1,9 @@
+name: "x"
+version: "0.1.0"
+manifest_version: 2 # Only V1 is supported
+base_url: "https://api.example.com"
+actions:
+  list:
+    role: source
+    method: GET
+    path: "/items"

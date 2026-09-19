@@ -1,0 +1,25 @@
+name: "minimal"
+version: "0.1.0"
+manifest_version: 1
+
+base_url: "https://api.example.com"
+
+auth:
+  type: bearer
+  token: "{{ secrets.API_TOKEN }}"
+
+secrets:
+  API_TOKEN:
+    description: "API token"
+
+actions:
+  list:
+    role: source
+    method: GET
+    path: "/items"
+    records: "$.items"
+    paginate:
+      style: page
+      param: page
+      start: 1
+      until: empty

@@ -1,0 +1,15 @@
+name: "x"
+version: "0.1.0"
+manifest_version: 1
+base_url: "https://api.example.com"
+settings:
+  limit:
+    type: number
+    # Non string types cannot have a one_of field, because one_of is only for string enums.
+    # A parse would extract Integers here, and that's not allowed
+    one_of: ["10", "20"]
+actions:
+  list:
+    role: source
+    method: GET
+    path: "/items"
