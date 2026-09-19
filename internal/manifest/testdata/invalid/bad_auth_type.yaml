@@ -1,0 +1,12 @@
+name: "x"
+version: "0.1.0"
+manifest_version: 1
+base_url: "https://api.example.com"
+auth:
+  # Only none, basic, bearer, header, or query are valid auth types.
+  type: aws_sigv4
+actions:
+  list:
+    role: source
+    method: GET
+    path: "/items"

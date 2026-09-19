@@ -1,0 +1,11 @@
+name: "x"
+version: "0.1.0"
+manifest_version: 1
+base_url: "https://api.example.com"
+actions:
+  list:
+    role: source
+    method: GET
+    path: "/items"
+    # This is a type that would invalidate the manifest
+    slect: "typo"

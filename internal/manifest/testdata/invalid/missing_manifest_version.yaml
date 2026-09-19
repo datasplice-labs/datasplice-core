@@ -1,0 +1,8 @@
+name: "x"
+version: "0.1.0"
+base_url: "https://api.example.com"
+actions:
+  list:
+    role: source
+    method: GET
+    path: "/items"
