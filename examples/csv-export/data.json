@@ -1,0 +1,5 @@
+[
+  {"id": 1, "name": "Ada Lovelace", "role": "engineer", "internal_notes": "drop me"},
+  {"id": 2, "name": "Grace Hopper", "role": "engineer", "internal_notes": "drop me too"},
+  {"id": 3, "name": "Margaret Hamilton", "role": "engineer", "internal_notes": "and me"}
+]

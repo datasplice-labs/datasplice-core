@@ -2,3 +2,4 @@
 /datasplice.exe
 _old
 /binaries
+examples/csv-export/out.csv

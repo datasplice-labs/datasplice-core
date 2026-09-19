@@ -1,0 +1,15 @@
+name: "csv export"
+
+steps:
+  - uses: "datasplice/json@latest"
+    with:
+      path: "data.json"
+
+  - uses: "datasplice/map@latest"
+    with:
+      select: ["id", "name", "role"]
+
+  - uses: "datasplice/csv@latest"
+    with:
+      path: "out.csv"
+      atomic: true
