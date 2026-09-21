@@ -5,6 +5,7 @@ import (
 
 	"github.com/datasplice-labs/datasplice-core/internal/config"
 	"github.com/datasplice-labs/datasplice-core/internal/manifest"
+	"github.com/datasplice-labs/datasplice-core/internal/pipeline"
 	"github.com/datasplice-labs/datasplice-core/internal/redact"
 	"github.com/spf13/cobra"
 )
@@ -40,6 +41,12 @@ var validateCmd = &cobra.Command{
 		defer func() {
 			err = redactErr(err, resolved.SecretValues)
 		}()
+
+		// Building the steps resolves every package and runs its offline
+		// checks (a manifest's settings and secrets) without running anything.
+		if _, err := pipeline.Build(resolved.Main, resolved.SecretValues); err != nil {
+			return err
+		}
 
 		rw := redact.New(cmd.OutOrStdout(), resolved.SecretValues)
 		for _, w := range resolved.Warnings {

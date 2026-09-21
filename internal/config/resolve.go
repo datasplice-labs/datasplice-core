@@ -49,7 +49,7 @@ func referencedNames(m *Main) []string {
 	var names []string
 
 	for _, s := range m.Steps {
-		for _, n := range scanRefs(s.With) {
+		for _, n := range append(scanRefs(s.With), s.Secrets...) {
 			if !seen[n] {
 				seen[n] = true
 				names = append(names, n)
@@ -58,6 +58,19 @@ func referencedNames(m *Main) []string {
 	}
 
 	return names
+}
+
+// StepSecrets returns the secret values a step may see: the names it
+// lists under `secrets:` plus any it references as ${NAME} in `with:`.
+func StepSecrets(s Step, values map[string]string) map[string]string {
+	out := ReferencedValues(s.With, values)
+	for _, n := range s.Secrets {
+		if v, ok := values[n]; ok {
+			out[n] = v
+		}
+	}
+
+	return out
 }
 
 // Given a variable (any) return the list of referenced secret names.

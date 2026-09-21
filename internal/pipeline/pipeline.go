@@ -38,7 +38,7 @@ func Build(m *config.Main, secretValues map[string]string) ([]Step, error) {
 	// 2. The last step's export mustn't be invalid, so we need to know which step is last.
 	for i, s := range m.Steps {
 		// This resolves the package
-		p, err := resolve(s.Uses)
+		p, err := resolveStep(s)
 		if err != nil {
 			return nil, fmt.Errorf("step %d (%s): %w", i+1, s.Uses, err)
 		}
@@ -47,6 +47,15 @@ func Build(m *config.Main, secretValues map[string]string) ([]Step, error) {
 		with, err := config.Interpolate(s.With, secretValues)
 		if err != nil {
 			return nil, fmt.Errorf("step %d (%s): %w", i+1, s.Uses, err)
+		}
+
+		// Packages that can check themselves offline (manifest packages)
+		// do it here, so `validate` and `plan` catch a bad `with:` or a
+		// missing `secrets:` entry before anything runs.
+		if v, ok := p.(stepValidator); ok {
+			if err := v.Validate(with, s.Secrets); err != nil {
+				return nil, fmt.Errorf("step %d (%s): %w", i+1, s.Uses, err)
+			}
 		}
 
 		// The last step cannot have an export, because there is nothing downstream to receive it.
@@ -69,7 +78,7 @@ func Build(m *config.Main, secretValues map[string]string) ([]Step, error) {
 			Describe: d,
 			Role:     positionRole(i, len(m.Steps)),
 			With:     with,
-			Secrets:  config.ReferencedValues(s.With, secretValues),
+			Secrets:  config.StepSecrets(s, secretValues),
 		}
 	}
 
