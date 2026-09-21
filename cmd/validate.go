@@ -14,13 +14,13 @@ var (
 	manifestPath string
 )
 
-// validate never resolves packages or touches the network — it only
-// proves the YAML parses, is free of unknown fields, and every secret
-// reference resolves (datasplice-core-prd.md §3).
+// validate is offline: it proves the YAML parses, is free of unknown
+// fields, every secret reference resolves, and every step's package
+// checks out (a manifest's settings and secrets), without running anything.
 var validateCmd = &cobra.Command{
 	Use:   "validate",
-	Short: "Parse and schema-check the flow, without spawning any package",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	Short: "Check the flow and its packages, offline: nothing is fetched or run",
+	RunE: func(cmd *cobra.Command, args []string) (err error) {
 		// --manifest checks a package manifest standalone, for package authors.
 		if manifestPath != "" {
 			m, err := manifest.Load(manifestPath)
@@ -36,6 +36,11 @@ var validateCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+
+		defer func() {
+			err = redactErr(err, resolved.SecretValues)
+		}()
+
 		rw := redact.New(cmd.OutOrStdout(), resolved.SecretValues)
 		for _, w := range resolved.Warnings {
 			if _, err := fmt.Fprintln(rw, "warning:", w); err != nil {

@@ -20,12 +20,16 @@ var dryRun bool
 var runCmd = &cobra.Command{
 	Use:   "run",
 	Short: fmt.Sprintf("Run the flow described by %s", MainFile),
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(cmd *cobra.Command, args []string) (err error) {
 		// Load and resolve the main and secrets files, then build and configure the pipeline.
 		resolved, err := config.LoadAndResolve(MainFile, SecretsFile)
 		if err != nil {
 			return err
 		}
+
+		defer func() {
+			err = redactErr(err, resolved.SecretValues)
+		}()
 
 		// Build the pipeline steps from the resolved config
 		// making sure that the secrets are correctly interpolated into the step configurations

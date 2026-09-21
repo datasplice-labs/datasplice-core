@@ -26,6 +26,7 @@ func New(w io.Writer, secretValues map[string]string) *Writer {
 			values = append(values, v)
 		}
 	}
+
 	return &Writer{w: w, secrets: values}
 }
 
@@ -33,6 +34,7 @@ func (r *Writer) Write(p []byte) (int, error) {
 	if _, err := io.WriteString(r.w, r.String(string(p))); err != nil {
 		return 0, err
 	}
+
 	return len(p), nil
 }
 
@@ -42,5 +44,6 @@ func (r *Writer) String(s string) string {
 	for _, secret := range r.secrets {
 		s = strings.ReplaceAll(s, secret, "***")
 	}
+
 	return s
 }
