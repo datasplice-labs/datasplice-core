@@ -1,0 +1,61 @@
+name: Update version
+
+on:
+  push:
+    branches: [master]
+
+# The GitHub App token authenticates the push. The workflow token only needs read access.
+permissions:
+  contents: read
+
+concurrency:
+  group: version-master
+  cancel-in-progress: false
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Check version App configuration
+      env:
+        VERSION_APP_ID: ${{ secrets.VERSION_APP_ID }}
+        VERSION_APP_PRIVATE_KEY: ${{ secrets.VERSION_APP_PRIVATE_KEY }}
+      run: |
+        test -n "$VERSION_APP_ID" || { echo "VERSION_APP_ID is required" >&2; exit 1; }
+        test -n "$VERSION_APP_PRIVATE_KEY" || { echo "VERSION_APP_PRIVATE_KEY is required" >&2; exit 1; }
+
+    - name: Create version App token
+      id: app-token
+      uses: actions/create-github-app-token@v2
+      with:
+        app-id: ${{ secrets.VERSION_APP_ID }}
+        private-key: ${{ secrets.VERSION_APP_PRIVATE_KEY }}
+        permission-contents: write
+
+    - uses: actions/checkout@v7
+      with:
+        fetch-depth: 0
+        token: ${{ steps.app-token.outputs.token }}
+
+    - name: Calculate version
+      env:
+        BASE_SHA: ${{ github.event.before }}
+        HEAD_SHA: ${{ github.sha }}
+      run: bash .github/scripts/set-version.sh
+
+    - name: Commit version
+      env:
+        VERSION_APP_NAME: ${{ steps.app-token.outputs.app-slug }}[bot]
+        VERSION_APP_EMAIL: ${{ steps.app-token.outputs.app-slug }}[bot]@users.noreply.github.com
+      run: |
+        if git diff --quiet -- version/VERSION; then
+          echo "Version is already current"
+          exit 0
+        fi
+
+        git config user.name "$VERSION_APP_NAME"
+        git config user.email "$VERSION_APP_EMAIL"
+        git add version/VERSION
+        git commit -m "chore: update version [skip ci]"
+        git push origin HEAD:master

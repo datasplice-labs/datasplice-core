@@ -22,6 +22,10 @@ var rootCmd = &cobra.Command{
 
 	// Usage text after a runtime failure (a 404, a bad file) is noise.
 	SilenceUsage: true,
+
+	// Version is the version of the datasplice core, printed by
+	// `datasplice version` or `datasplice --version`.
+	Version: "",
 }
 
 // redactErr masks secret values in err's message. cobra prints returned
@@ -36,7 +40,9 @@ func redactErr(err error, secrets map[string]string) error {
 }
 
 // Execute runs the root command; main just calls this.
-func Execute() {
+func Execute(v string) {
+	rootCmd.Version = v
+
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
