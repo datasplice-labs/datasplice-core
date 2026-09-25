@@ -1,0 +1,29 @@
+name: "posts to csv, no manifest file"
+
+steps:
+  # datasplice/http is a one-endpoint source: no datasplice.yaml needed,
+  # just `with:`. Under the hood it builds a one-action manifest from
+  # this block and runs it through the same engine examples/http-source
+  # uses — see CLAUDE.md "Manifest packages".
+  - uses: "datasplice/http@latest"
+    with:
+      url: "https://jsonplaceholder.typicode.com/posts"
+      query:
+        _limit: 10
+      records: "$"
+      paginate:
+        style: "page"
+        param: "_page"
+        start: 1
+        until: "empty"
+    # Stop after 25 records, mid-page.
+    max_records: 25
+
+  - uses: "datasplice/map@latest"
+    with:
+      select: ["id", "userId", "title"]
+
+  - uses: "datasplice/csv@latest"
+    with:
+      path: "posts.csv"
+      atomic: true

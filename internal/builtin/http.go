@@ -2,261 +2,177 @@ package builtin
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
+	"maps"
 	"net/url"
-	"strconv"
-	"time"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/datasplice-labs/datasplice-core/internal/contract"
-	"github.com/datasplice-labs/datasplice-core/internal/record"
+	"github.com/datasplice-labs/datasplice-core/internal/httpengine"
+	"github.com/datasplice-labs/datasplice-core/internal/manifest"
 )
 
-// HTTP is a source builtin: fetches JSON, walks with.records_path (a
-// dotted path, like record.Get) to find the array of records, and
-// optionally paginates and rate-limits.
+// HTTP is a source builtin for a single endpoint that doesn't have a
+// package yet: no datasplice.yaml on disk, just a `with:` block. It's
+// not a second HTTP implementation — Configure builds a one-action
+// in-memory *manifest.Manifest straight from `with:` and hands it to the
+// same httpengine that runs published/local manifest packages, so
+// auth/pagination/retry/rate-limit/JSONPath behave identically either
+// way.
 //
-// ponytail: pagination supports "cursor" (a response field holding the
-// next URL) and "page" (increment a query param) — link-header and
-// offset styles aren't implemented; add them the same way when a real
-// source needs one (datasplice-core-prd.md M1).
+// `with:` uses the manifest vocabulary directly (records/fields are
+// JSONPath, paginate/auth/rate_limit/retry match manifest.go's shapes)
+// rather than reinventing one — see docs/getting-started/manifest-specs.md.
 type HTTP struct {
-	url         string
-	method      string
-	headers     map[string]string
-	basicUser   string
-	basicPass   string
-	recordsPath string
-	pagination  map[string]any
-	minInterval time.Duration
+	maxRecords int
+	pkg        *httpengine.SourcePackage
 }
 
 func NewHTTP() *HTTP { return &HTTP{} }
 
+// SetMaxRecords lets pipeline.Build wire a step's `max_records:` through
+// — see maxRecordsSetter in internal/pipeline/manifestpkg.go. Must be
+// called before Configure, same as `with:`/`secrets:` are only known by
+// Configure time.
+func (h *HTTP) SetMaxRecords(n int) { h.maxRecords = n }
+
 func (h *HTTP) Describe() contract.Describe {
 	return contract.Describe{
-		Name: "http", Version: "0.1.0", Roles: []contract.Role{contract.RoleSource},
+		Name: "http", Version: "0.2.0", Roles: []contract.Role{contract.RoleSource},
 		Settings: []contract.SettingSpec{{Key: "url", Type: "string", Required: true}},
 	}
 }
 
 func (h *HTTP) Configure(settings map[string]any, secrets map[string]string) error {
-	u, ok := settings["url"].(string)
-	if !ok {
-		return fmt.Errorf("http: `with.url` must be a string")
+	m, err := manifestFromWith(settings)
+	if err != nil {
+		return fmt.Errorf("http: %w", err)
 	}
 
-	if u == "" {
-		return fmt.Errorf("http: `with.url` is required")
-	}
-	h.url = u
-
-	h.method, _ = settings["method"].(string)
-	// Default to GET if not specified, since most sources will be GET.
-	if h.method == "" {
-		h.method = http.MethodGet
+	if err := m.Validate(); err != nil {
+		return fmt.Errorf("http: %w", err)
 	}
 
-	h.headers = map[string]string{}
-	if hdrs, ok := settings["headers"].(map[string]any); ok {
-		for k, v := range hdrs {
-			h.headers[k] = fmt.Sprint(v)
-		}
+	pkg, err := httpengine.NewSourcePackage(m, "fetch", h.maxRecords)
+	if err != nil {
+		return fmt.Errorf("http: %w", err)
 	}
 
-	if auth, ok := settings["auth"].(map[string]any); ok {
-		if err := h.configureAuth(auth); err != nil {
-			return err
-		}
+	// Values from `with:` are already-resolved literals (interpolated via
+	// ${NAME} before Configure ran, same as every builtin) — there's
+	// nothing left for the engine to resolve against settings/secrets.
+	if err := pkg.Configure(nil, nil); err != nil {
+		return err
 	}
 
-	h.recordsPath, _ = settings["records_path"].(string)
-	if p, ok := settings["pagination"].(map[string]any); ok {
-		h.pagination = p
-	}
-
-	if rl, ok := settings["rate_limit"].(float64); ok && rl > 0 {
-		h.minInterval = time.Duration(float64(time.Second) / rl)
-	}
+	h.pkg = pkg
 
 	return nil
 }
 
-func (h *HTTP) configureAuth(auth map[string]any) error {
-	typ, _ := auth["type"].(string)
-	switch typ {
-	case "", "none":
-	case "bearer":
-		token, _ := auth["token"].(string)
-		h.headers["Authorization"] = "Bearer " + token
-	case "basic":
-		h.basicUser, _ = auth["username"].(string)
-		h.basicPass, _ = auth["password"].(string)
-	case "api_token":
-		header, _ := auth["header"].(string)
-		if header == "" {
-			header = "Authorization"
-		}
-		token, _ := auth["token"].(string)
-		h.headers[header] = token
-	default:
-		return fmt.Errorf("http: unknown auth.type %q", typ)
-	}
-
-	return nil
-}
-
-// Process fetches one page at a time, in a loop, until nextURL says
-// there's nothing more to follow (empty reqURL). There's no goroutine
-// here — HTTP is a source with nothing upstream, so it just fetches,
-// emits, fetches again, sequentially, at whatever pace rate-limiting and
-// the remote server allow.
 func (h *HTTP) Process(ctx context.Context, in <-chan contract.Batch, out chan<- contract.Batch) error {
-	reqURL := h.url
-	var lastReq time.Time
-	page := 1
-	for reqURL != "" {
-		// Rate limiting: if we already made a request and it hasn't
-		// been minInterval yet, sleep out the remainder before firing
-		// the next one. The select lets a cancellation interrupt the
-		// wait instead of blocking it out to the end.
-		if h.minInterval > 0 && !lastReq.IsZero() {
-			if wait := h.minInterval - time.Since(lastReq); wait > 0 {
-				select {
-				case <-time.After(wait):
-				case <-ctx.Done():
-					return ctx.Err()
-				}
+	return h.pkg.Process(ctx, in, out)
+}
+
+// manifestFromWith builds the single-action manifest Configure needs.
+// `with.url` is the whole endpoint (scheme, host, path, and any query
+// string); everything else mirrors a real datasplice.yaml action.
+func manifestFromWith(with map[string]any) (*manifest.Manifest, error) {
+	raw, _ := with["url"].(string)
+	if raw == "" {
+		return nil, fmt.Errorf("`with.url` is required")
+	}
+
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return nil, fmt.Errorf("`with.url` must be an absolute http(s) URL")
+	}
+
+	action := manifest.Action{Role: "source", Method: "GET", Path: u.Path}
+	if action.Path == "" {
+		action.Path = "/" // a bare host (e.g. "https://api.example.com") means the root
+	}
+	if method, ok := with["method"].(string); ok && method != "" {
+		action.Method = method
+	}
+
+	action.Query = map[string]any{}
+	for k, v := range u.Query() {
+		action.Query[k] = v[0]
+	}
+
+	if q, ok := with["query"].(map[string]any); ok {
+		maps.Copy(action.Query, q)
+	}
+
+	if headers, ok := with["headers"].(map[string]any); ok {
+		action.Headers = map[string]string{}
+		for k, v := range headers {
+			action.Headers[k] = fmt.Sprint(v)
+		}
+	}
+
+	if recs, ok := with["records"].(string); ok {
+		action.Records = recs
+	}
+
+	if fields, ok := with["fields"].(map[string]any); ok {
+		action.Fields = map[string]string{}
+		for k, v := range fields {
+			if s, ok := v.(string); ok {
+				action.Fields[k] = s
 			}
 		}
+	}
 
-		body, err := h.fetch(ctx, reqURL)
-		if err != nil {
-			return fmt.Errorf("http: %w", err)
-		}
-		lastReq = time.Now()
-
-		var doc any
-		if err := json.Unmarshal(body, &doc); err != nil {
-			return fmt.Errorf("http: decoding response: %w", err)
-		}
-		root, _ := doc.(map[string]any)
-
-		// Emit this page's records as one batch downstream. Skipped
-		// entirely if the page had none, so an empty page never produces
-		// an empty batch on the channel.
-		items := extractRecords(root, doc, h.recordsPath)
-		if len(items) > 0 {
-			select {
-			case out <- items:
-			case <-ctx.Done():
-				return ctx.Err()
-			}
-		}
-
-		// Work out the next URL to fetch (if any) from this response —
-		// reqURL becomes "" when pagination says we're done, which ends
-		// the loop.
-		reqURL, page, err = h.nextURL(root, reqURL, page, len(items) > 0)
-		if err != nil {
-			return fmt.Errorf("http: %w", err)
+	if p, ok := with["paginate"]; ok {
+		if action.Paginate, err = decodeSubField[manifest.Paginate](p); err != nil {
+			return nil, fmt.Errorf("paginate: %w", err)
 		}
 	}
-	return nil
+
+	m := &manifest.Manifest{
+		Name: "http", Version: "0.0.0", ManifestVersion: manifest.SupportedManifestVersion,
+		BaseURL: u.Scheme + "://" + u.Host,
+		Actions: map[string]manifest.Action{"fetch": action},
+	}
+
+	if a, ok := with["auth"]; ok {
+		if m.Auth, err = decodeSubField[manifest.Auth](a); err != nil {
+			return nil, fmt.Errorf("auth: %w", err)
+		}
+	}
+
+	if rl, ok := with["rate_limit"]; ok {
+		if m.RateLimit, err = decodeSubField[manifest.RateLimit](rl); err != nil {
+			return nil, fmt.Errorf("rate_limit: %w", err)
+		}
+	}
+
+	if rt, ok := with["retry"]; ok {
+		if m.Retry, err = decodeSubField[manifest.Retry](rt); err != nil {
+			return nil, fmt.Errorf("retry: %w", err)
+		}
+	}
+
+	return m, nil
 }
 
-func (h *HTTP) fetch(ctx context.Context, target string) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, h.method, target, nil)
+// decodeSubField turns a `with:` fragment (whatever YAML/JSON produced —
+// a map[string]any) into one of manifest's own typed structs, reusing
+// its yaml tags instead of hand-writing a parallel set of type
+// assertions for every field.
+func decodeSubField[T any](v any) (*T, error) {
+	b, err := yaml.Marshal(v)
 	if err != nil {
 		return nil, err
 	}
-	for k, v := range h.headers {
-		req.Header.Set(k, v)
-	}
-	if h.basicUser != "" {
-		req.SetBasicAuth(h.basicUser, h.basicPass)
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
+
+	var out T
+	if err := yaml.Unmarshal(b, &out); err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("%s: %d: %s", target, resp.StatusCode, body)
-	}
-	return body, nil
-}
 
-func extractRecords(root map[string]any, doc any, path string) contract.Batch {
-	target := doc
-	if path != "" && root != nil {
-		if v, ok := record.Record(root).Get(path); ok {
-			target = v
-		}
-	}
-	arr, _ := target.([]any)
-	items := make(contract.Batch, 0, len(arr))
-	for _, el := range arr {
-		if m, ok := el.(map[string]any); ok {
-			items = append(items, record.Record(m))
-		}
-	}
-	return items
-}
-
-// nextURL applies with.pagination. type "cursor" reads a field naming the
-// next page's URL (empty/missing = done); type "page" increments a query
-// param up to max_pages, stopping early if a page came back empty.
-func (h *HTTP) nextURL(root map[string]any, curURL string, page int, gotItems bool) (string, int, error) {
-	if h.pagination == nil {
-		return "", page, nil
-	}
-	typ, _ := h.pagination["type"].(string)
-	switch typ {
-	case "", "none":
-		return "", page, nil
-	case "cursor":
-		field, _ := h.pagination["field"].(string)
-		if field == "" {
-			return "", page, fmt.Errorf("pagination.field is required for type cursor")
-		}
-		if root == nil {
-			return "", page, nil
-		}
-		next, ok := record.Record(root).Get(field)
-		if !ok {
-			return "", page, nil
-		}
-		s, _ := next.(string)
-		return s, page, nil
-	case "page":
-		if !gotItems {
-			return "", page, nil
-		}
-		maxPages, _ := h.pagination["max_pages"].(float64)
-		param, _ := h.pagination["param"].(string)
-		if param == "" {
-			param = "page"
-		}
-		page++
-		if maxPages > 0 && page > int(maxPages) {
-			return "", page, nil
-		}
-		u, err := url.Parse(curURL)
-		if err != nil {
-			return "", page, err
-		}
-		q := u.Query()
-		q.Set(param, strconv.Itoa(page))
-		u.RawQuery = q.Encode()
-		return u.String(), page, nil
-	default:
-		return "", page, fmt.Errorf("unknown pagination.type %q", typ)
-	}
+	return &out, nil
 }

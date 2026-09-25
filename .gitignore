@@ -3,3 +3,5 @@
 _old
 /binaries
 examples/csv-export/out.csv
+examples/http-source/posts.csv
+examples/http-builtin/posts.csv

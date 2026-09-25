@@ -48,7 +48,12 @@ func resolveStep(s config.Step) (contract.Package, error) {
 	}
 
 	if s.MaxRecords != 0 {
-		return nil, fmt.Errorf("`max_records` is only supported on manifest packages, not %s", s.Uses)
+		setter, ok := p.(maxRecordsSetter)
+		if !ok {
+			return nil, fmt.Errorf("`max_records` is not supported on %s", s.Uses)
+		}
+
+		setter.SetMaxRecords(s.MaxRecords)
 	}
 
 	return p, nil
@@ -58,4 +63,11 @@ func resolveStep(s config.Step) (contract.Package, error) {
 // `with:` and `secrets:` offline, before anything runs.
 type stepValidator interface {
 	Validate(with map[string]any, granted []string) error
+}
+
+// maxRecordsSetter is implemented by builtins backed by httpengine (only
+// datasplice/http today) that want the step-level `max_records:` a
+// manifest-file step already gets via httpengine.NewSourcePackage.
+type maxRecordsSetter interface {
+	SetMaxRecords(int)
 }

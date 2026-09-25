@@ -10,11 +10,14 @@ var validSettingTypes = map[string]bool{"string": true, "number": true, "bool": 
 var validAuthTypes = map[string]bool{"": true, "none": true, "basic": true, "bearer": true, "header": true, "query": true}
 var validRoles = map[string]bool{"source": true, "transform": true, "sink": true}
 
-// validate checks everything that doesn't depend on a step's `with:`
+// Validate checks everything that doesn't depend on a step's `with:`
 //
 // manifest_version, reserved keys, settings/action shapes, and that
-// secrets are only referenced where they're allowed to be.
-func (m *Manifest) validate() error {
+// secrets are only referenced where they're allowed to be. Load calls
+// this on every manifest file; a caller building a *Manifest in memory
+// (e.g. the datasplice/http builtin, from its own `with:` block) can
+// call it directly to get the same checks.
+func (m *Manifest) Validate() error {
 	if m.ManifestVersion != SupportedManifestVersion {
 		return fmt.Errorf("manifest_version: %d is not supported (supported: %d)", m.ManifestVersion, SupportedManifestVersion)
 	}

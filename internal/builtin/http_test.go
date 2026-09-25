@@ -37,10 +37,13 @@ func TestHTTPCursorPaginationAndAuth(t *testing.T) {
 
 	h := NewHTTP()
 	if err := h.Configure(map[string]any{
-		"url":          srv.URL,
-		"auth":         map[string]any{"type": "bearer", "token": "tok"},
-		"records_path": "items",
-		"pagination":   map[string]any{"type": "cursor", "field": "next"},
+		"url":     srv.URL,
+		"auth":    map[string]any{"type": "bearer", "token": "tok"},
+		"records": "$.items",
+		"paginate": map[string]any{
+			"style": "cursor",
+			"next":  "$.next",
+		},
 	}, nil); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
@@ -66,5 +69,65 @@ func TestHTTPCursorPaginationAndAuth(t *testing.T) {
 	}
 	if len(got) != 3 {
 		t.Fatalf("expected 3 records across both pages, got %v", got)
+	}
+}
+
+func TestHTTPRequiresURL(t *testing.T) {
+	h := NewHTTP()
+	if err := h.Configure(map[string]any{}, nil); err == nil {
+		t.Fatal("expected an error: with.url is required")
+	}
+}
+
+func TestHTTPRejectsBadURL(t *testing.T) {
+	h := NewHTTP()
+	if err := h.Configure(map[string]any{"url": "not-a-url"}, nil); err == nil {
+		t.Fatal("expected an error: with.url must be absolute")
+	}
+}
+
+// A bare host with no path (e.g. an httptest server URL) must still
+// pass manifest validation, which requires a non-empty action path.
+func TestHTTPBareHostDefaultsToRootPath(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			t.Errorf("path = %q, want /", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode([]any{})
+	}))
+	defer srv.Close()
+
+	h := NewHTTP()
+	if err := h.Configure(map[string]any{"url": srv.URL}, nil); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+
+	out := make(chan contract.Batch, 1)
+	if err := h.Process(context.Background(), nil, out); err != nil {
+		t.Fatalf("Process: %v", err)
+	}
+}
+
+// query params already in with.url survive alongside with.query.
+func TestHTTPMergesURLAndWithQuery(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("from_url") != "1" || r.URL.Query().Get("extra") != "2" {
+			t.Errorf("query = %q", r.URL.RawQuery)
+		}
+		_ = json.NewEncoder(w).Encode([]any{})
+	}))
+	defer srv.Close()
+
+	h := NewHTTP()
+	if err := h.Configure(map[string]any{
+		"url":   srv.URL + "/items?from_url=1",
+		"query": map[string]any{"extra": "2"},
+	}, nil); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+
+	out := make(chan contract.Batch, 1)
+	if err := h.Process(context.Background(), nil, out); err != nil {
+		t.Fatalf("Process: %v", err)
 	}
 }
