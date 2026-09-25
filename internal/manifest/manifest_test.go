@@ -61,7 +61,7 @@ func TestZendeskFieldsUnmarshalCorrectly(t *testing.T) {
 	if m.Auth.Type != "basic" || m.Auth.Username == "" {
 		t.Fatalf("auth = %+v", m.Auth)
 	}
-	if m.RateLimit.Requests != 200 || m.RateLimit.Overrides["incremental_export"].Requests != 10 {
+	if m.RateLimit.Requests != 200 || m.RateLimit.Overrides["show_many"].Requests != 10 {
 		t.Fatalf("rate_limit = %+v", m.RateLimit)
 	}
 	if m.Retry.MaxAttempts != 5 || !m.Retry.RespectRetryAfter {

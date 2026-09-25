@@ -47,6 +47,15 @@ func TestValidateWithAccepts(t *testing.T) {
 	}
 }
 
+// YAML decodes `limit: 10` as an int, not a float64.
+func TestValidateWithAcceptsYAMLInt(t *testing.T) {
+	m := testManifest()
+	with := map[string]any{"subdomain": "acme", "resource": "tickets", "limit": 10}
+	if err := m.ValidateWith(with); err != nil {
+		t.Fatalf("ValidateWith: %v", err)
+	}
+}
+
 func TestValidateSecretsCovered(t *testing.T) {
 	m := testManifest()
 	if err := m.ValidateSecretsCovered(nil); err == nil {
