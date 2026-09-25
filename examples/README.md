@@ -31,5 +31,30 @@ You can also run
 go run ./main.go validate --manifest path-to-manifest/datasplice.yaml
 ```
 
-Not runnable in a flow yet: fetching third-party manifests and executing
-their actions against a real API aren't built yet.
+This one is format-only: it describes an API you'd need an account for.
+See `http-source/` for a manifest you can actually run.
+
+## `http-source/`
+
+A manifest package running against a real API (the free
+[JSONPlaceholder](https://jsonplaceholder.typicode.com)): it pages through
+posts 10 at a time, rate limited and with retries, stops after 25 records
+(`max_records`), and writes three fields to `posts.csv`. Needs network access.
+
+
+```bash
+cd examples/http-source
+datasplice validate   # offline: checks the flow and the manifest's settings
+datasplice run
+```
+
+You can also run
+```bash
+go run ./main.go validate --manifest examples/http-source/datasplice.yaml
+cd examples/http-source
+go run ./../../main.go run
+```
+
+`uses: "./datasplice.yaml"` points at a manifest on disk, which is how you
+try a package before publishing it. Fetching published packages
+(`github.com/org/datasplice-x@v1.0.0`) isn't built yet.

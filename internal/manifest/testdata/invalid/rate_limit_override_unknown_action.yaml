@@ -1,0 +1,17 @@
+name: "x"
+version: "0.1.0"
+manifest_version: 1
+base_url: "https://api.example.com"
+rate_limit:
+  requests: 10
+  per: minute
+  overrides:
+    # There is no action called "nope".
+    nope:
+      requests: 1
+      per: minute
+actions:
+  list:
+    role: source
+    method: GET
+    path: "/items"

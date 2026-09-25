@@ -1,0 +1,12 @@
+name: "x"
+version: "0.1.0"
+manifest_version: 1
+base_url: "https://api.example.com"
+actions:
+  list:
+    role: source
+    method: GET
+    path: "/items"
+    paginate:
+      # A cursor needs to know where the next page URL lives.
+      style: cursor

@@ -1,0 +1,12 @@
+name: "x"
+version: "0.1.0"
+manifest_version: 1
+base_url: "https://api.example.com"
+auth:
+  # bearer needs a token.
+  type: bearer
+actions:
+  list:
+    role: source
+    method: GET
+    path: "/items"

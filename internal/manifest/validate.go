@@ -50,7 +50,7 @@ func (m *Manifest) validate() error {
 	}
 
 	if m.Auth != nil && !validAuthTypes[m.Auth.Type] {
-		return fmt.Errorf("auth.type %q is not implemented yet (want none, basic, bearer, header, or query)", m.Auth.Type)
+		return fmt.Errorf("auth.type %q is not allowed (want none, basic, bearer, header, or query)", m.Auth.Type)
 	}
 
 	// We cannot have a secret reference in the base_url, because it would end up in a URL, a log line, or a request body.
@@ -70,7 +70,7 @@ func (m *Manifest) validate() error {
 		}
 	}
 
-	return nil
+	return m.validateHTTP()
 }
 
 // secretRe matches {{ secrets.NAME }} — used to keep secrets out of
@@ -182,7 +182,11 @@ func checkSettingType(name string, v any, want string) error {
 	case "string":
 		_, ok = v.(string)
 	case "number":
-		_, ok = v.(float64)
+		// yaml.v3 decodes whole numbers as int, JSON as float64.
+		switch v.(type) {
+		case int, int64, float64:
+			ok = true
+		}
 	case "bool":
 		_, ok = v.(bool)
 	}

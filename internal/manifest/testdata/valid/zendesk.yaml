@@ -32,7 +32,7 @@ rate_limit:
   requests: 200
   per: minute
   overrides:
-    incremental_export:
+    show_many:
       requests: 10
       per: minute
 

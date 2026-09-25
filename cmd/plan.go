@@ -16,11 +16,16 @@ import (
 var planCmd = &cobra.Command{
 	Use:   "plan",
 	Short: "Check the pipeline can run, offline",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(cmd *cobra.Command, args []string) (err error) {
 		resolved, err := config.LoadAndResolve(MainFile, SecretsFile)
 		if err != nil {
 			return err
 		}
+
+		defer func() {
+			err = redactErr(err, resolved.SecretValues)
+		}()
+
 		steps, err := pipeline.Build(resolved.Main, resolved.SecretValues)
 		if err != nil {
 			return err

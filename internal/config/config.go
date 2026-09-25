@@ -14,9 +14,21 @@ import (
 // Step is the one shape every step has: `uses` plus `with`. Role comes
 // from the package's Describe response, not from which keys are set.
 type Step struct {
-	Uses   string         `yaml:"uses"`
-	With   map[string]any `yaml:"with,omitempty"`
-	Export *Export        `yaml:"export,omitempty"`
+	Uses string         `yaml:"uses"`
+	With map[string]any `yaml:"with,omitempty"`
+
+	// Action picks which action of a manifest package to run.
+	// Builtins have none.
+	Action string `yaml:"action,omitempty"`
+
+	// Secrets lists the secret names this step may see, on top of any it
+	// references as ${NAME} in `with:`.
+	Secrets []string `yaml:"secrets,omitempty"`
+
+	// MaxRecords caps how many records a manifest source emits (0: no cap).
+	MaxRecords int `yaml:"max_records,omitempty"`
+
+	Export *Export `yaml:"export,omitempty"`
 }
 
 // Export mirrors a step's `export:` block. Not valid on the last step:
@@ -130,6 +142,10 @@ func LoadMain(path string) (*Main, error) {
 	for i, s := range m.Steps {
 		if s.Uses == "" {
 			return nil, fmt.Errorf("%s: step %d: `uses` is required", path, i+1)
+		}
+
+		if s.MaxRecords < 0 {
+			return nil, fmt.Errorf("%s: step %d: `max_records` must not be negative", path, i+1)
 		}
 	}
 
