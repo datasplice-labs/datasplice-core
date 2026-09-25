@@ -1,0 +1,14 @@
+name: "x"
+version: "0.1.0"
+manifest_version: 1
+base_url: "https://api.example.com"
+actions:
+  list:
+    role: source
+    method: GET
+    path: "/items"
+    paginate:
+      style: page
+      param: page
+      # Only `empty` or a single comparison is allowed.
+      until: "$.a == 1 && $.b == 2"

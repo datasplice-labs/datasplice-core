@@ -1,0 +1,20 @@
+name: "posts to csv"
+
+steps:
+  # A local path is used as-is; a published package would be
+  # "github.com/org/datasplice-x@v1.0.0" once resolution exists.
+  - uses: "./datasplice.yaml"
+    action: "list"
+    with:
+      resource: "posts"
+    # Stop after 25 records, in the middle of the third page.
+    max_records: 25
+
+  - uses: "datasplice/map@latest"
+    with:
+      select: ["id", "userId", "title"]
+
+  - uses: "datasplice/csv@latest"
+    with:
+      path: "posts.csv"
+      atomic: true

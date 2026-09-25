@@ -1,0 +1,13 @@
+name: "x"
+version: "0.1.0"
+manifest_version: 1
+base_url: "https://api.example.com"
+retry:
+  # The initial_delay field is invalid because it should be a duration (e.g., "5s", "1m")
+  # instead of a string like "soon".
+  initial_delay: soon
+actions:
+  list:
+    role: source
+    method: GET
+    path: "/items"

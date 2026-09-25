@@ -1,0 +1,12 @@
+name: "x"
+version: "0.1.0"
+manifest_version: 1
+base_url: "https://api.example.com"
+retry:
+  # 42 is not an HTTP status code.
+  on: [429, 42]
+actions:
+  list:
+    role: source
+    method: GET
+    path: "/items"

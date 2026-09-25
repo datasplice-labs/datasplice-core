@@ -1,0 +1,39 @@
+# A package manifest for JSONPlaceholder, a free fake REST API.
+name: "jsonplaceholder"
+version: "0.1.0"
+description: "JSONPlaceholder fake REST API"
+manifest_version: 1
+
+settings:
+  resource:
+    type: string
+    required: true
+    one_of: [posts, comments, todos, users]
+
+base_url: "https://jsonplaceholder.typicode.com"
+
+# At most 5 requests a second, retrying transient failures.
+rate_limit:
+  requests: 5
+  per: second
+
+retry:
+  on: [429, 500, 502, 503, 504]
+  respect_retry_after: true
+  max_attempts: 3
+  backoff: exponential
+  initial_delay: 1s
+
+actions:
+  list:
+    role: source
+    method: GET
+    path: "/{{ settings.resource }}"
+    query:
+      _limit: 10
+    # Fetch _page=1, 2, 3... until a page comes back empty.
+    paginate:
+      style: page
+      param: _page
+      start: 1
+      until: empty
