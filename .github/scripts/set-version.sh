@@ -40,7 +40,19 @@ else
 fi
 
 mapfile -t subjects < <(git log --format=%s "${commit_range[@]}")
-last_subject="${subjects[0]:-}"
+
+# git log is newest-first, but a merged push usually starts with a synthetic
+# "Merge pull request ..." commit. Find the newest commit that affects the
+# build version instead of assuming the first subject is relevant.
+last_subject=""
+for subject in "${subjects[@]}"; do
+  if [[ "$subject" =~ $feat_breaking_pattern ]] ||
+    [[ "$subject" =~ $feat_pattern ]] ||
+    [[ "$subject" =~ $fix_pattern ]]; then
+    last_subject="$subject"
+    break
+  fi
+done
 
 if [[ "$last_subject" =~ $feat_breaking_pattern ]]; then
   ((build_major += 1))
