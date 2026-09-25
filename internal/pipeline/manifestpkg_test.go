@@ -158,6 +158,49 @@ func TestManifestSourceMaxRecords(t *testing.T) {
 	}
 }
 
+// datasplice/http is httpengine-backed too (internal/builtin/http.go), so
+// it gets the same max_records support as a manifest-file source — the
+// same server thingsServer serves for TestManifestSourceMaxRecords above.
+func TestHTTPBuiltinAcceptsMaxRecords(t *testing.T) {
+	srv, requests := thingsServer(t, 10, 5)
+	out := filepath.Join(t.TempDir(), "out.csv")
+
+	m := &config.Main{
+		Name: "http-max-records",
+		Steps: []config.Step{
+			{
+				Uses:       "datasplice/http@latest",
+				MaxRecords: 7,
+				With: map[string]any{
+					"url":     srv.URL + "/a",
+					"records": "$.items",
+					"auth":    map[string]any{"type": "bearer", "token": "tok-123"},
+					"paginate": map[string]any{
+						"style": "page",
+						"param": "page",
+						"until": "empty",
+					},
+				},
+			},
+			{Uses: "datasplice/csv@latest", With: map[string]any{"path": out}},
+		},
+	}
+
+	steps, err := Build(m, nil)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	if err := Configure(steps); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+
+	count, err := Run(context.Background(), steps)
+	if err != nil || count != 7 || *requests != 2 {
+		t.Fatalf("count = %d, requests = %d, err = %v; want 7 records over 2 requests", count, *requests, err)
+	}
+}
+
 // The offline checks fire in Build, so `validate` and `plan` catch them
 // before anything runs.
 func TestManifestStepValidation(t *testing.T) {
@@ -206,7 +249,10 @@ func TestManifestOnlyFieldsRejectedOnBuiltins(t *testing.T) {
 		want string
 	}{
 		{"action", config.Step{Uses: "datasplice/json@latest", Action: "list", With: map[string]any{"path": "x.json"}}, "`action` is only valid"},
-		{"max_records", config.Step{Uses: "datasplice/json@latest", MaxRecords: 5, With: map[string]any{"path": "x.json"}}, "`max_records` is only supported"},
+		// max_records IS supported on datasplice/http (httpengine-backed,
+		// see TestHTTPBuiltinAcceptsMaxRecords) — json has no pagination
+		// concept at all, so it stays rejected.
+		{"max_records on a non-paginating builtin", config.Step{Uses: "datasplice/json@latest", MaxRecords: 5, With: map[string]any{"path": "x.json"}}, "`max_records` is not supported"},
 	}
 
 	for _, c := range cases {

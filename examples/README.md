@@ -58,3 +58,25 @@ go run ./../../main.go run
 `uses: "./datasplice.yaml"` points at a manifest on disk, which is how you
 try a package before publishing it. Fetching published packages
 (`github.com/org/datasplice-x@v1.0.0`) isn't built yet.
+
+## `http-builtin/`
+
+The same JSONPlaceholder posts flow as `http-source/`, but with no
+`datasplice.yaml` at all — `datasplice/http` is a one-endpoint source,
+everything (`url`, `query`, `records`, `paginate`, `max_records`) goes
+straight in the step's `with:` block. It's the same engine underneath
+(see CLAUDE.md "Manifest packages"), just without a manifest file for a
+one-off endpoint. Needs network access.
+
+```bash
+cd examples/http-builtin
+datasplice validate
+datasplice run
+```
+
+You can also run
+```bash
+go run ./main.go validate --manifest examples/http-builtin/datasplice.yaml
+cd examples/http-builtin
+go run ./../../main.go run
+```

@@ -139,7 +139,7 @@ func Load(path string) (*Manifest, error) {
 	}
 
 	// Validate the manifest's fields, so we can return a clear error message
-	if err := m.validate(); err != nil {
+	if err := m.Validate(); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 
