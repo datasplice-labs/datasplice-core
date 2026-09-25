@@ -46,7 +46,7 @@ jobs:
 
     - name: Commit version
       env:
-        VERSION_APP_NAME: ${{ steps.app-token.outputs.app-slug }}[bot]
+        VERSION_APP_NAME: ${{ steps.app-token.outputs.app-slug }}
         VERSION_APP_EMAIL: ${{ steps.app-token.outputs.app-slug }}[bot]@users.noreply.github.com
       run: |
         if git diff --quiet -- version/VERSION; then
