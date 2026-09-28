@@ -132,15 +132,25 @@ func Load(path string) (*Manifest, error) {
 		return nil, fmt.Errorf("reading %s: %w", path, err)
 	}
 
-	// Decode the manifest inside Manifest, so we can validate it before returning.
-	var m Manifest
-	if err := decodeStrict(data, &m); err != nil {
-		return nil, fmt.Errorf("parsing %s: %w", path, err)
+	m, err := Parse(data)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 
-	// Validate the manifest's fields, so we can return a clear error message
+	return m, nil
+}
+
+// Parse strictly parses and validates manifest bytes that didn't come
+// from a file — e.g. internal/registry's cached third-party manifests,
+// already read and hash-verified before this ever runs.
+func Parse(data []byte) (*Manifest, error) {
+	var m Manifest
+	if err := decodeStrict(data, &m); err != nil {
+		return nil, fmt.Errorf("parsing: %w", err)
+	}
+
 	if err := m.Validate(); err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
+		return nil, err
 	}
 
 	return &m, nil

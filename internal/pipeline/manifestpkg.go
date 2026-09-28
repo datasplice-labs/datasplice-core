@@ -9,6 +9,11 @@ import (
 	"github.com/datasplice-labs/datasplice-core/internal/contract"
 	"github.com/datasplice-labs/datasplice-core/internal/httpengine"
 	"github.com/datasplice-labs/datasplice-core/internal/manifest"
+
+	// Aliased: this file's own package-level `registry` var (in
+	// registry.go, the builtin table) would otherwise collide with the
+	// import name.
+	thirdparty "github.com/datasplice-labs/datasplice-core/internal/registry"
 )
 
 // isLocalRef reports whether uses points at a manifest file on disk
@@ -25,12 +30,22 @@ func isLocalRef(uses string) bool {
 	return filepath.IsAbs(uses)
 }
 
-// resolveStep turns a step into a package: a manifest on disk, or a
+// resolveStep turns a step into a package: a manifest on disk, a
+// third-party package already `get`-ed into the local cache, or a
 // builtin. Fields that only make sense for manifest packages are
 // rejected on builtins rather than silently ignored.
 func resolveStep(s config.Step) (contract.Package, error) {
 	if isLocalRef(s.Uses) {
 		m, err := manifest.Load(s.Uses)
+		if err != nil {
+			return nil, err
+		}
+
+		return httpengine.NewSourcePackage(m, s.Action, s.MaxRecords)
+	}
+
+	if thirdparty.IsThirdParty(s.Uses) {
+		m, err := resolveThirdParty(s.Uses)
 		if err != nil {
 			return nil, err
 		}
@@ -57,6 +72,34 @@ func resolveStep(s config.Step) (contract.Package, error) {
 	}
 
 	return p, nil
+}
+
+// resolveThirdParty loads an already-`get`-ed package: read
+// datasplice.lock, read the cached manifest, verify it against the
+// pinned hash. No network here — validate/plan/run all stay offline;
+// only `datasplice get` fetches (see cmd/get.go).
+func resolveThirdParty(uses string) (*manifest.Manifest, error) {
+	ref, err := thirdparty.ParseRef(uses)
+	if err != nil {
+		return nil, err
+	}
+
+	lock, err := thirdparty.LoadLockfile(thirdparty.LockFile)
+	if err != nil {
+		return nil, err
+	}
+
+	home, err := thirdparty.Home()
+	if err != nil {
+		return nil, err
+	}
+
+	data, err := thirdparty.Load(home, lock, ref)
+	if err != nil {
+		return nil, err
+	}
+
+	return manifest.Parse(data)
 }
 
 // stepValidator is implemented by packages that can check a step's
