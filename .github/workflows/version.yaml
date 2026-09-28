@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   version:
-    if: github.repository != 'datasplice-labs/datasplice-core' && !github.event.repository.fork
+    if: github.repository == 'datasplice-labs/datasplice-core' && !github.event.repository.fork
     runs-on: ubuntu-latest
 
     steps:
