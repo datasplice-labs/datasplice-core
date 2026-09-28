@@ -47,6 +47,12 @@ func NewSourcePackage(m *manifest.Manifest, action string, maxRecords int) (*Sou
 	return &SourcePackage{m: m, action: action, maxRecords: maxRecords}, nil
 }
 
+// Destination is the URL template (base_url + the action's path), for
+// `plan`. It's deliberately unresolved, so no setting or secret is needed.
+func (p *SourcePackage) Destination(map[string]any) string {
+	return p.m.BaseURL + p.m.Actions[p.action].Path
+}
+
 func (p *SourcePackage) Describe() contract.Describe {
 	specs := make([]contract.SettingSpec, 0, len(p.m.Settings))
 	for key, s := range p.m.Settings {

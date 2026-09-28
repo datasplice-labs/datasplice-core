@@ -137,6 +137,49 @@ func TestManifestSourceEndToEnd(t *testing.T) {
 	}
 }
 
+// T7.2: a manifest source shows its URL template (unresolved, so no setting
+// or secret is needed), a sink shows its output path.
+func TestBuildRecordsDestinations(t *testing.T) {
+	srv, _ := thingsServer(t, 1, 1)
+
+	steps, err := Build(manifestFlow(writeManifest(t, srv.URL), "out.csv", nil), map[string]string{"TOKEN": "tok-123"})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	if want := srv.URL + "/{{ settings.kind }}"; steps[0].Destination != want {
+		t.Errorf("source destination = %q, want %q", steps[0].Destination, want)
+	}
+
+	if steps[0].Action != "list" {
+		t.Errorf("source action = %q, want list", steps[0].Action)
+	}
+
+	if steps[1].Destination != "out.csv" {
+		t.Errorf("sink destination = %q, want out.csv", steps[1].Destination)
+	}
+}
+
+func TestBuildDestinationsForBuiltins(t *testing.T) {
+	m := &config.Main{Name: "x", Steps: []config.Step{
+		{Uses: "datasplice/http", With: map[string]any{"url": "https://api.example.com/things"}},
+		{Uses: "datasplice/map", With: map[string]any{"select": []any{"id"}}},
+		{Uses: "datasplice/json", With: map[string]any{"path": "out.json"}},
+	}}
+
+	steps, err := Build(m, nil)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	want := []string{"https://api.example.com/things", "", "out.json"}
+	for i, w := range want {
+		if steps[i].Destination != w {
+			t.Errorf("step %d destination = %q, want %q", i+1, steps[i].Destination, w)
+		}
+	}
+}
+
 // T5.18 through the pipeline: max_records stops the run early.
 func TestManifestSourceMaxRecords(t *testing.T) {
 	srv, requests := thingsServer(t, 10, 5)

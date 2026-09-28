@@ -36,6 +36,12 @@ func (j *JSON) Describe() contract.Describe {
 	}
 }
 
+// Destination is the file path, for `plan`.
+func (j *JSON) Destination(with map[string]any) string {
+	path, _ := with["path"].(string)
+	return path
+}
+
 func (j *JSON) Configure(settings map[string]any, secrets map[string]string) error {
 	path, _ := settings["path"].(string)
 	if path == "" {
