@@ -24,8 +24,12 @@ type Step struct {
 	// declares more than one, like json, has no other way to say which).
 	Describe contract.Describe
 	Role     contract.Role
+	Action   string // the manifest action, empty for builtins
 	With     map[string]any
 	Secrets  map[string]string
+	// Destination is where the step reads from or writes to, for `plan`;
+	// empty when the package doesn't say (e.g. a transform).
+	Destination string
 }
 
 // Build resolves every step's package, interpolates its settings, and
@@ -70,15 +74,22 @@ func Build(m *config.Main, secretValues map[string]string) ([]Step, error) {
 			pkg = newExportingPackage(p, s.Export)
 		}
 
+		var destination string
+		if dd, ok := p.(destinationDescriber); ok {
+			destination = dd.Destination(with)
+		}
+
 		d := p.Describe()
 		steps[i] = Step{
-			ID:       fmt.Sprintf("%d-%s", i+1, d.Name),
-			Uses:     s.Uses,
-			Pkg:      pkg,
-			Describe: d,
-			Role:     positionRole(i, len(m.Steps)),
-			With:     with,
-			Secrets:  config.StepSecrets(s, secretValues),
+			ID:          fmt.Sprintf("%d-%s", i+1, d.Name),
+			Uses:        s.Uses,
+			Pkg:         pkg,
+			Describe:    d,
+			Role:        positionRole(i, len(m.Steps)),
+			Action:      s.Action,
+			With:        with,
+			Secrets:     config.StepSecrets(s, secretValues),
+			Destination: destination,
 		}
 	}
 

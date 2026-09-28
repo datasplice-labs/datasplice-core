@@ -34,6 +34,12 @@ func (c *CSV) Describe() contract.Describe {
 	}
 }
 
+// Destination is the file path, for `plan`.
+func (c *CSV) Destination(with map[string]any) string {
+	path, _ := with["path"].(string)
+	return path
+}
+
 func (c *CSV) Configure(settings map[string]any, secrets map[string]string) error {
 	path, ok := settings["path"].(string)
 	if !ok {

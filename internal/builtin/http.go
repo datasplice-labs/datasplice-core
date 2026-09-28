@@ -44,6 +44,12 @@ func (h *HTTP) Describe() contract.Describe {
 	}
 }
 
+// Destination is the request URL, for `plan`.
+func (h *HTTP) Destination(with map[string]any) string {
+	url, _ := with["url"].(string)
+	return url
+}
+
 func (h *HTTP) Configure(settings map[string]any, secrets map[string]string) error {
 	m, err := manifestFromWith(settings)
 	if err != nil {
