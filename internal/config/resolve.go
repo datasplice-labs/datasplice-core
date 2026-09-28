@@ -25,6 +25,12 @@ func LoadAndResolve(mainPath, secretsPath string) (*Resolved, error) {
 		return nil, err
 	}
 
+	return Resolve(m, sf)
+}
+
+// Resolve is LoadAndResolve's second half, for callers (plan) that need to
+// report a secrets failure separately from a config that won't parse.
+func Resolve(m *Main, sf *SecretsFile) (*Resolved, error) {
 	block, err := ResolveSecrets(m, sf)
 	if err != nil {
 		return nil, err
